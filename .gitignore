@@ -1,0 +1,10 @@
+# Large files downloaded/built by setup.py — regenerate with:  python setup.py
+dict.sqlite
+static/kuromoji/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local machine-specific editor/agent settings
+.claude/settings.local.json

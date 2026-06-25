@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VN Texthooker</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="toolbar">
+  <span class="brand">VN&nbsp;Texthooker</span>
+  <span id="status" class="status connecting" title="connection status">connecting…</span>
+  <span class="spacer"></span>
+  <button id="pauseBtn" title="Pause / resume clipboard capture">⏸ Pause</button>
+  <button id="furiBtn" title="Toggle furigana readings">あ Furigana</button>
+  <label class="fontctl">A
+    <input id="fontRange" type="range" min="16" max="56" value="30">
+  </label>
+  <button id="clearBtn" title="Clear all lines">🗑 Clear</button>
+  <span id="dictStatus" class="dict-status" title="tokenizer status">loading tokenizer…</span>
+</header>
+
+<main id="lines"></main>
+
+<div id="popup" class="popup hidden"></div>
+
+<div id="hint" class="hint">
+  Copy Japanese text (or hook a game with <b>Textractor</b> → Clipboard output) and it
+  appears here. <b>Hover</b> any word for its meaning.
+</div>
+
+<script src="/static/kuromoji/kuromoji.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

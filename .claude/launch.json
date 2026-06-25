@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "texthooker",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["server.py", "--no-browser", "--port", "6972"],
+      "port": 6972
+    }
+  ]
+}
