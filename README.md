@@ -26,7 +26,7 @@ python setup.py            # (or double-click setup.bat)
 python server.py           # (or double-click run.bat)
 ```
 
-Your browser opens at `http://127.0.0.1:6969`. Copy some Japanese text and it
+Your browser opens at `http://127.0.0.1:3939`. Copy some Japanese text and it
 appears instantly. Hover a word for its definition.
 
 ### Using it with a game

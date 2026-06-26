@@ -7,7 +7,7 @@ Pure standard library. Run `python setup.py` once first to build dict.sqlite and
 download the kuromoji tokenizer into static/kuromoji/.
 
 Usage:
-    python server.py            # http://127.0.0.1:6969
+    python server.py            # http://127.0.0.1:3939
     python server.py --port 7000 --no-browser
 """
 
@@ -526,7 +526,7 @@ def main():
     except Exception:
         pass
     ap = argparse.ArgumentParser(description="Down the Rabbit Hole - VN texthooker server")
-    ap.add_argument("--port", type=int, default=6969)
+    ap.add_argument("--port", type=int, default=3939)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args()
