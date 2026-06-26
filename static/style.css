@@ -35,6 +35,7 @@
   --font-family: "Segoe UI", system-ui, sans-serif;
   --font-size: 30px;
   --text-align: left;   /* reader text alignment (toolbar segment) */
+  --brand-emoji: "🐇"; /* per-theme brand glyph; settings.js swaps it with the palette */
 }
 
 * { box-sizing: border-box; }
@@ -73,6 +74,7 @@ body {
   flex-wrap: wrap;
 }
 .brand { font-weight: 700; letter-spacing: .3px; color: var(--accent); }
+.brand-emoji::before { content: var(--brand-emoji, "🐇"); }
 .spacer { flex: 1; }
 
 #toolbar button {

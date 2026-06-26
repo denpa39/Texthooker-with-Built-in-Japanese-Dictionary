@@ -17,6 +17,12 @@
     "White Rabbit":    { "--bg": "#f7f3e8", "--text": "#38322a", "--accent": "#a87f24", "--accent-2": "#c1556f", "--pos": "#5f8742", "--danger": "#b8392b" }, // cream coat, watch gold, pink eyes (light)
   };
   const CORE_VARS = ["--bg", "--text", "--accent", "--accent-2", "--pos", "--danger"];
+  // Per-theme brand glyph in the toolbar. White Rabbit gets his "I'm late!" pocket
+  // watch so the rabbit stays unique to Alice (the default / rabbit-hole theme).
+  const EMOJI = {
+    "Alice": "🐇", "Caterpillar": "🐛", "Cheshire": "😸",
+    "Mad Hatter": "🎩", "Queen of Hearts": "👑", "White Rabbit": "🕰️",
+  };
   // colours exposed as pickers (label -> css var). --furigana has no preset value
   // (it's derived from the theme in CSS); the picker just lets you override it.
   const PICKERS = [
@@ -70,6 +76,7 @@
     const root = document.documentElement.style;
     const preset = PRESETS[s.preset] || PRESETS["Alice"];
     CORE_VARS.forEach(v => root.setProperty(v, preset[v]));
+    root.setProperty("--brand-emoji", '"' + (EMOJI[s.preset] || EMOJI["Alice"]) + '"');
     root.removeProperty("--furigana");                 // default: derived from the theme in CSS
     if (s.colors) for (const v in s.colors) root.setProperty(v, s.colors[v]);  // custom overrides
     root.setProperty("--font-family", FONTS[s.font] || FONTS["Default (Sans)"]);
