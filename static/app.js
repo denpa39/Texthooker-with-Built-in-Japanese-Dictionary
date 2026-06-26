@@ -98,6 +98,7 @@ function buildSentence(text) {
       span.dataset.surface = surface;
       span.dataset.pos = t.pos || "";
       span.dataset.jreading = (t.reading && t.reading !== "*") ? t.reading : "";
+      span.dataset.off = String((t.word_position || 1) - 1);  // start index in the line
 
       if (showFurigana && hasKanji(surface) && t.reading && t.reading !== "*") {
         const ruby = document.createElement("ruby");
@@ -136,16 +137,18 @@ function addLine(text) {
   while (linesEl.children.length > 300) linesEl.removeChild(linesEl.firstChild);
 }
 
-/* ---- dictionary lookup + popup ---------------------------------------- */
-async function fetchLookup(term, pos, reading) {
-  const key = (pos || "") + "|" + (reading || "") + "|" + term;
+/* ---- dictionary lookup + popup (longest-match scan) -------------------- */
+let pinned = false;
+
+async function fetchScan(text, pos, reading, base) {
+  const key = [pos || "", reading || "", base || "", text].join("|");
   if (lookupCache.has(key)) return lookupCache.get(key);
   try {
-    const r = await fetch("/lookup?term=" + encodeURIComponent(term) +
+    const r = await fetch("/scan?text=" + encodeURIComponent(text) +
                           "&pos=" + encodeURIComponent(pos || "") +
-                          "&reading=" + encodeURIComponent(reading || ""));
-    const j = await r.json();
-    const res = j.results || [];
+                          "&reading=" + encodeURIComponent(reading || "") +
+                          "&base=" + encodeURIComponent(base || ""));
+    const res = (await r.json()).candidates || [];
     lookupCache.set(key, res);
     return res;
   } catch (e) {
@@ -153,30 +156,97 @@ async function fetchLookup(term, pos, reading) {
   }
 }
 
-function renderEntry(entry) {
+function plainReading(reading) {
+  const rd = document.createElement("span");
+  rd.className = "reading";
+  rd.textContent = reading;
+  return rd;
+}
+
+// Fortnite-style word rarity (rarer word = higher tier).
+// Prefers the VN frequency rank (jiten.moe) when present, else general frequency.
+function rarity(e) {
+  const rk = e.vrd;                          // VN rank: lower = more common
+  if (rk != null) {
+    if (rk <= 1500)  return ["Common", "r-common", rk];
+    if (rk <= 5000)  return ["Uncommon", "r-uncommon", rk];
+    if (rk <= 15000) return ["Rare", "r-rare", rk];
+    if (rk <= 35000) return ["Epic", "r-epic", rk];
+    return ["Legendary", "r-legendary", rk];
+  }
+  const df = (e.df != null) ? e.df : (e.f || 0);
+  if (df >= 30000) return ["Common", "r-common", null];
+  if (df >= 3000)  return ["Uncommon", "r-uncommon", null];
+  if (df >= 250)   return ["Rare", "r-rare", null];
+  if (df >= 15)    return ["Epic", "r-epic", null];
+  if (df >= 1)     return ["Legendary", "r-legendary", null];
+  return ["Mythic", "r-mythic", null];
+}
+
+function renderCandidate(c) {
+  const entry = c.entry;
   const div = document.createElement("div");
-  div.className = "entry";
+  div.className = "entry" + (c.kind === "name" ? " name" : "");
+
+  // inflection trail: 食べさせられた · causative › passive › past
+  if (c.reasons && c.reasons.length) {
+    const inf = document.createElement("div");
+    inf.className = "inflect";
+    inf.textContent = c.matched + "  ·  " + c.reasons.join(" › ");
+    div.appendChild(inf);
+  }
 
   const head = document.createElement("div");
   head.className = "head";
-  const primary = entry.k[0] || entry.r[0] || "";
-  head.textContent = primary;
-  if (entry.r.length && entry.k.length) {
-    const rd = document.createElement("span");
-    rd.className = "reading";
-    rd.textContent = entry.r[0];
-    head.appendChild(rd);
+  const primary = (entry.k && entry.k[0]) || (entry.r && entry.r[0]) || c.matched;
+  const hw = document.createElement("span");
+  hw.className = "hw";
+  hw.textContent = primary;
+  head.appendChild(hw);
+  const reading = entry.r && entry.r[0];
+  if (reading && entry.k && entry.k.length) {
+    head.appendChild(plainReading(reading));
   }
-  if (entry.c) {
+  if (c.kind === "name") {
     const tag = document.createElement("span");
-    tag.className = "common-tag";
-    tag.textContent = "common";
+    tag.className = "name-tag";
+    tag.textContent = "name";
+    head.appendChild(tag);
+  } else {
+    const [label, cls, rk] = rarity(entry);
+    const tag = document.createElement("span");
+    tag.className = "rarity " + cls;
+    tag.textContent = label;
+    tag.title = rk != null ? `VN frequency rank #${rk.toLocaleString()}`
+                           : "word rarity (by general frequency)";
     head.appendChild(tag);
   }
+
+  const copy = document.createElement("button");
+  copy.className = "mini";
+  copy.textContent = "⧉";
+  copy.title = "copy word";
+  copy.addEventListener("click", ev => {
+    ev.stopPropagation();
+    if (navigator.clipboard) navigator.clipboard.writeText(primary);
+    copy.textContent = "✓";
+    setTimeout(() => (copy.textContent = "⧉"), 900);
+  });
+  head.appendChild(copy);
+
+  const jisho = document.createElement("a");
+  jisho.className = "mini";
+  jisho.textContent = "↗";
+  jisho.title = "look up on Jisho.org";
+  jisho.href = "https://jisho.org/search/" + encodeURIComponent(primary);
+  jisho.target = "_blank";
+  jisho.rel = "noopener";
+  jisho.addEventListener("click", ev => ev.stopPropagation());
+  head.appendChild(jisho);
   div.appendChild(head);
 
-  // alternate forms
-  const alts = [...entry.k.slice(1), ...(entry.k.length ? [] : entry.r.slice(1))];
+  const alts = [...(entry.k || []).slice(1),
+                ...((entry.k && entry.k.length) ? [] : (entry.r || []).slice(1))];
   if (alts.length) {
     const alt = document.createElement("div");
     alt.className = "alt";
@@ -184,7 +254,7 @@ function renderEntry(entry) {
     div.appendChild(alt);
   }
 
-  entry.s.forEach((s, i) => {
+  (entry.s || []).forEach((s, i) => {
     const sense = document.createElement("div");
     sense.className = "sense";
     if (s.pos && s.pos.length) {
@@ -208,24 +278,30 @@ function renderEntry(entry) {
   return div;
 }
 
-async function showPopup(target) {
-  const term = target.dataset.term;
-  const surface = target.dataset.surface;
-  const pos = target.dataset.pos;
-  const reading = target.dataset.jreading;
-  let results = await fetchLookup(term, pos, reading);
-  if (!results.length && surface && surface !== term) {
-    results = await fetchLookup(surface, pos, reading);
-  }
+async function showScanPopup(target) {
+  const line = target.closest(".line");
+  if (!line) return;
+  const off = parseInt(target.dataset.off || "0", 10);
+  const text = line.dataset.raw.slice(off);
+  const cands = await fetchScan(text, target.dataset.pos,
+                                target.dataset.jreading, target.dataset.term);
 
   popup.innerHTML = "";
-  if (!results.length) {
+  if (pinned) {
+    const close = document.createElement("button");
+    close.className = "pin-close";
+    close.textContent = "×";
+    close.title = "close";
+    close.addEventListener("click", unpin);
+    popup.appendChild(close);
+  }
+  if (!cands.length) {
     const e = document.createElement("div");
     e.className = "empty";
-    e.textContent = `No dictionary entry for 「${term}」`;
+    e.textContent = `No entry for 「${target.dataset.surface || target.dataset.term}」`;
     popup.appendChild(e);
   } else {
-    results.slice(0, 12).forEach(en => popup.appendChild(renderEntry(en)));
+    cands.forEach(c => popup.appendChild(renderCandidate(c)));
   }
   positionPopup(target);
   popup.classList.remove("hidden");
@@ -249,22 +325,40 @@ function positionPopup(target) {
 
 let hideTimer = null;
 function scheduleHide() {
+  if (pinned) return;
   clearTimeout(hideTimer);
   hideTimer = setTimeout(() => popup.classList.add("hidden"), 180);
 }
 function cancelHide() { clearTimeout(hideTimer); }
+function unpin() {
+  pinned = false;
+  popup.classList.remove("pinned");
+  popup.classList.add("hidden");
+}
 
 linesEl.addEventListener("mouseover", e => {
   const t = e.target.closest(".token.word");
-  if (!t) return;
+  if (!t || pinned) return;
   cancelHide();
-  showPopup(t);
+  showScanPopup(t);
 });
 linesEl.addEventListener("mouseout", e => {
   if (e.target.closest(".token.word")) scheduleHide();
 });
+linesEl.addEventListener("click", e => {
+  const t = e.target.closest(".token.word");
+  if (!t) return;
+  pinned = true;
+  popup.classList.add("pinned");
+  cancelHide();
+  showScanPopup(t);          // click a word to pin the popup open
+});
 popup.addEventListener("mouseenter", cancelHide);
 popup.addEventListener("mouseleave", scheduleHide);
+document.addEventListener("keydown", e => { if (e.key === "Escape") unpin(); });
+document.addEventListener("click", e => {
+  if (pinned && !e.target.closest(".token.word") && !e.target.closest("#popup")) unpin();
+});
 
 /* ---- clipboard stream (SSE) ------------------------------------------- */
 function connectStream() {
@@ -309,7 +403,23 @@ furiBtn.addEventListener("click", () => {
   rebuildSentences();
 });
 
+// Remove only the most recent line (undo), and move the "latest" highlight back.
 document.getElementById("clearBtn").addEventListener("click", () => {
+  const last = linesEl.lastElementChild;
+  if (!last) return;
+  if (!popup.classList.contains("hidden")) unpin();  // close any popup tied to it
+  last.remove();
+  const prev = linesEl.lastElementChild;
+  if (prev) {
+    prev.classList.add("latest");
+  } else {
+    hint.classList.remove("gone");  // back to empty state
+  }
+});
+
+// Clear all lines.
+document.getElementById("clearAllBtn").addEventListener("click", () => {
+  if (!popup.classList.contains("hidden")) unpin();
   linesEl.innerHTML = "";
   hint.classList.remove("gone");
 });

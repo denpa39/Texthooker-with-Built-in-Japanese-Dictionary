@@ -24,6 +24,8 @@ from ctypes import wintypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
+import deinflect
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 DB_PATH = os.path.join(BASE_DIR, "dict.sqlite")
@@ -193,47 +195,108 @@ _KANA_PREF = {
 }
 
 
+def _fetch_entries(term):
+    """All JMdict entries whose kanji/kana exactly equals `term` (kana fallback)."""
+    db = get_db()
+    out, seen = [], set()
+    cands = [term]
+    h = to_hiragana(term)
+    if h != term:
+        cands.append(h)
+    for cand in cands:
+        rows = db.execute(
+            "SELECT DISTINCT e.id, e.json FROM terms t JOIN entries e ON e.id = t.id "
+            "WHERE t.term = ? ORDER BY e.freq DESC LIMIT 40", (cand,)).fetchall()
+        for eid, js in rows:
+            if eid not in seen:
+                seen.add(eid)
+                out.append(json.loads(js))
+        if out:
+            break
+    return out
+
+
+def _fetch_names(term):
+    """JMnedict name entries (empty if the names table hasn't been built)."""
+    db = get_db()
+    try:
+        rows = db.execute(
+            "SELECT DISTINCT n.id, n.json FROM nameterms t JOIN names n ON n.id = t.id "
+            "WHERE t.term = ? LIMIT 8", (term,)).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    return [json.loads(js) for _id, js in rows]
+
+
+def _rank_key(e, pos, reading_h, pref):
+    # grammatical role, then reading, then frequency: は the particle (not 羽),
+    # 本【ほん】"book" (not 本【もと】), 居る "to be" (not 射る "to shoot").
+    is_verb = pos == "動詞"
+    allowed = _POS_MAP.get(pos)
+    pf = 0 if (pref and pref in e.get("k", [])) else 1
+    pm = 0 if (allowed or is_verb) and _pos_match(e, allowed or set(), is_verb) else 1
+    rm = 0 if reading_h and _reading_match(e, reading_h) else 1
+    # VN frequency (jiten.moe): in-list words first, by ascending rank; then wordfreq
+    vr = e.get("vr")
+    vr_flag, vr_rank = (0, vr) if isinstance(vr, int) else (1, 0)
+    return (pf, pm, rm, vr_flag, vr_rank, -e.get("f", 0))
+
+
 def lookup(term, pos=None, reading=None):
     if not term:
         return []
-    db = get_db()
-    candidates = [term]
-    h = to_hiragana(term)
-    if h != term:
-        candidates.append(h)
-    seen_ids = set()
-    results = []
-    for cand in candidates:
-        rows = db.execute(
-            "SELECT DISTINCT e.id, e.json "
-            "FROM terms t JOIN entries e ON e.id = t.id "
-            "WHERE t.term = ? ORDER BY e.freq DESC LIMIT 40",
-            (cand,),
-        ).fetchall()
-        for eid, js in rows:
-            if eid in seen_ids:
-                continue
-            seen_ids.add(eid)
-            results.append(json.loads(js))
-        if results:
-            break
-
-    # Rank by grammatical role, then reading, then frequency, so the right
-    # homograph wins: は the particle (not 羽), 本【ほん】"book" (not 本【もと】),
-    # 居る "to be" (not 射る "to shoot").
-    is_verb = pos == "動詞"
-    allowed = _POS_MAP.get(pos)
     reading_h = to_hiragana(reading) if reading else None
     pref = _KANA_PREF.get(term) or _KANA_PREF.get(to_hiragana(term))
-
-    def rank(e):
-        pf = 0 if (pref and pref in e.get("k", [])) else 1
-        pm = 0 if (allowed or is_verb) and _pos_match(e, allowed or set(), is_verb) else 1
-        rm = 0 if reading_h and _reading_match(e, reading_h) else 1
-        return (pf, pm, rm, -e.get("f", 0))
-
-    results.sort(key=rank)
+    results = _fetch_entries(term)
+    results.sort(key=lambda e: _rank_key(e, pos, reading_h, pref))
     return results
+
+
+def scan(text, pos=None, reading=None, base=None):
+    """Longest-match scan from the start of `text`: returns ranked candidate
+    matches (words via de-inflection + names), longest match first."""
+    text = (text or "").replace("\n", "")[:24]
+    if not text:
+        return []
+    reading_h = to_hiragana(reading) if reading else None
+    pref = _KANA_PREF.get(base or "") or _KANA_PREF.get(to_hiragana(base or ""))
+
+    cands, seen = [], set()
+    for end in range(len(text), 0, -1):
+        prefix = text[:end]
+        for form, reasons in deinflect.deinflect(prefix).items():
+            for e in _fetch_entries(form):
+                key = ("w", e["id"])
+                if key not in seen:
+                    seen.add(key)
+                    cands.append({"len": end, "matched": prefix, "reasons": reasons,
+                                  "kind": "word", "entry": e})
+        for e in _fetch_names(prefix):
+            key = ("n", e["id"])
+            if key not in seen:
+                seen.add(key)
+                cands.append({"len": end, "matched": prefix, "reasons": [],
+                              "kind": "name", "entry": e})
+
+    # Always include the tokenizer's dictionary form as a low-priority safety net —
+    # catches forms the de-inflector can't reach (e.g. bare ichidan stems written in
+    # kanji: 見 -> 見る). Longer real matches still rank above it.
+    if base:
+        for e in _fetch_entries(base):
+            key = ("w", e["id"])
+            if key not in seen:
+                seen.add(key)
+                cands.append({"len": 1, "matched": base, "reasons": [],
+                              "kind": "word", "entry": e})
+
+    def order(c):
+        rk = _rank_key(c["entry"], pos, reading_h, pref)  # (pf, pm, rm, vr_flag, vr, -freq)
+        # longest match first; then role/reading; then prefer exact over inflected;
+        # then VN frequency / wordfreq.
+        return (-c["len"], rk[0], rk[1], rk[2], len(c["reasons"]), *rk[3:])
+
+    cands.sort(key=order)
+    return cands[:12]
 
 
 # --------------------------------------------------------------------------- #
@@ -298,6 +361,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"term": term, "results": lookup(term, pos, reading)})
             except Exception as e:
                 self._send_json({"term": term, "results": [], "error": str(e)}, 500)
+        elif path == "/scan":
+            qs = parse_qs(parsed.query)
+            text = (qs.get("text") or [""])[0]
+            pos = (qs.get("pos") or [""])[0]
+            reading = (qs.get("reading") or [""])[0]
+            base = (qs.get("base") or [""])[0]
+            try:
+                self._send_json({"candidates": scan(text, pos, reading, base)})
+            except Exception as e:
+                self._send_json({"candidates": [], "error": str(e)}, 500)
         elif path == "/state":
             self._send_json({"paused": PAUSED.is_set()})
         elif path == "/events":
