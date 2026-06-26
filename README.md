@@ -82,7 +82,9 @@ with `--freq`.
   ranked below a real word of the same length.
 - **Polished popup** — click a word to pin it open, a copy button, and a Jisho.org link;
   hover for a quick peek.
-- **Furigana toggle**, adjustable font size, pause/resume capture, and clear.
+- **Furigana toggle**, **text alignment** (left / center / right / justify), adjustable
+  font size, **themes** (six Wonderland palettes plus custom colours & fonts),
+  pause/resume capture, undo, and clear.
 - Everything runs locally on `127.0.0.1`; nothing is sent anywhere, and no account or payment is needed.
 
 ---
@@ -93,8 +95,11 @@ with `--freq`.
 |---|---|
 | ⏸ Pause / ▶ Resume | Stop/continue reading the clipboard |
 | あ Furigana | Show readings above kanji |
+| ≣ Align | Text alignment — left, center, right, or justify |
+| ⚙ Theme | Appearance: theme, colours, and font |
 | A slider | Reader font size |
-| 🗑 Clear | Remove all lines |
+| ⌫ Undo | Remove the most recent line |
+| 🗑 Clear | Clear all lines (click twice to confirm) |
 | ● live / paused | Connection + capture status |
 
 ---
