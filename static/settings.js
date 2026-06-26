@@ -30,7 +30,11 @@
     "Rounded":        '"Yu Gothic UI", "BIZ UDPGothic", "Hiragino Maru Gothic ProN", "M PLUS Rounded 1c", sans-serif',
     "Monospace":      '"Cascadia Code", "Consolas", "MS Gothic", monospace',
   };
-  const DEFAULTS = { preset: "Alice", colors: {}, font: "Default (Sans)", fontSize: 30 };
+  const DEFAULTS = { preset: "Alice", colors: {}, font: "Default (Sans)", fontSize: 30, align: "left" };
+  const ALIGNS = ["left", "center", "right", "justify"];
+  // Per alignment: the block's [left, right] margins. "auto" pushes the block to the
+  // opposite edge — so left → flush left, right → flush right, center/justify → centred.
+  const ALIGN_MARGIN = { left: ["0", "auto"], center: ["auto", "auto"], right: ["auto", "0"], justify: ["auto", "auto"] };
   const LS_KEY = "vntex-appearance";
 
   function load() {
@@ -38,6 +42,7 @@
     try { s = Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem(LS_KEY)) || {}); }
     catch (_) { s = Object.assign({}, DEFAULTS); }
     if (!PRESETS[s.preset]) s.preset = DEFAULTS.preset;   // retired preset name -> default
+    if (!ALIGNS.includes(s.align)) s.align = DEFAULTS.align;
     return s;
   }
   function save(s) {
@@ -69,6 +74,10 @@
     if (s.colors) for (const v in s.colors) root.setProperty(v, s.colors[v]);  // custom overrides
     root.setProperty("--font-family", FONTS[s.font] || FONTS["Default (Sans)"]);
     root.setProperty("--font-size", (s.fontSize || 30) + "px");
+    root.setProperty("--text-align", s.align || "left");
+    const [ml, mr] = ALIGN_MARGIN[s.align] || ALIGN_MARGIN.left;
+    root.setProperty("--line-ml", ml);
+    root.setProperty("--line-mr", mr);
   }
 
   let settings = load();
@@ -141,6 +150,15 @@
       });
     }
 
+    // text-alignment segmented control (lives in the toolbar, not the panel, but
+    // persists through the same settings object).
+    const alignSeg = document.getElementById("alignSeg");
+    if (alignSeg) {
+      alignSeg.querySelectorAll("button[data-align]").forEach(btn => {
+        btn.addEventListener("click", () => { settings.align = btn.dataset.align; commit(); });
+      });
+    }
+
     // reset (with a brief confirmation)
     panel.querySelector("#setReset").addEventListener("click", (e) => {
       settings = Object.assign({}, DEFAULTS, { colors: {} });
@@ -173,6 +191,8 @@
       fontSel.value = settings.font;
       if (sizeRange) sizeRange.value = settings.fontSize;
       showSize();
+      if (alignSeg) alignSeg.querySelectorAll("button[data-align]").forEach(b =>
+        b.classList.toggle("active", b.dataset.align === settings.align));
     }
 
     function commit() { apply(settings); save(settings); syncControls(); }

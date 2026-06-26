@@ -34,6 +34,7 @@
   /* typography */
   --font-family: "Segoe UI", system-ui, sans-serif;
   --font-size: 30px;
+  --text-align: left;   /* reader text alignment (toolbar segment) */
 }
 
 * { box-sizing: border-box; }
@@ -92,13 +93,23 @@ body {
 .fontctl { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .fontctl input { accent-color: var(--accent); }
 
-.status, .dict-status { font-size: 12px; padding: 3px 9px; border-radius: 999px; }
+/* Reader text-alignment segmented control + line-spacing dropdown. */
+.seg { display: inline-flex; align-items: stretch; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+#toolbar .seg button {
+  background: var(--panel); color: var(--muted);
+  border: none; border-left: 1px solid var(--line); border-radius: 0;
+  padding: 5px 8px; display: flex; align-items: center;
+}
+#toolbar .seg button:first-child { border-left: none; }
+#toolbar .seg button:hover { background: var(--panel-hi); color: var(--text); border-color: var(--line); }
+#toolbar .seg button.active { background: var(--panel-hi); color: var(--accent); }
+.seg svg { display: block; width: 16px; height: 16px; }
+
+.status { font-size: 12px; padding: 3px 9px; border-radius: 999px; }
 .status.connecting { color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 14%, transparent); }
 .status.live { color: var(--pos); background: color-mix(in srgb, var(--pos) 14%, transparent); }
 .status.paused { color: var(--muted); background: color-mix(in srgb, var(--muted) 16%, transparent); }
 .status.error  { color: var(--danger); background: color-mix(in srgb, var(--danger) 13%, transparent); }
-.dict-status { color: var(--muted); background: color-mix(in srgb, var(--muted) 13%, transparent); }
-.dict-status.ready { color: var(--pos); background: color-mix(in srgb, var(--pos) 13%, transparent); }
 
 /* Settings panel ------------------------------------------------------- */
 .settings {
@@ -167,8 +178,13 @@ body {
   line-height: 1.9;
 }
 .line {
-  max-width: 36em;        /* comfortable reading measure on wide screens (em tracks --font-size) */
-  margin: 0 auto .55em;   /* …while #lines stays full-bleed: 40vh padding + auto-scroll untouched */
+  width: fit-content;     /* hug the sentence so the highlight tracks text length… */
+  max-width: 36em;        /* …up to a comfortable reading measure (em tracks --font-size) */
+  /* Alignment moves the whole block to a window edge (auto margins), not just the
+     text inside it — so "left" hugs the left gutter, "right" the right. */
+  margin-block: 0 .55em;
+  margin-inline: var(--line-ml, auto) var(--line-mr, auto);
+  text-align: var(--text-align);  /* left / center / right / justify (toolbar segment) */
   padding: 6px 10px;
   border-radius: 10px;
   border-left: 4px solid transparent;
@@ -278,7 +294,6 @@ ruby rt { font-size: .45em; color: var(--furigana); user-select: none; }
 @media (max-width: 560px) {
   #toolbar { gap: 8px; padding: 8px 10px; }
   .brand .brand-text { display: none; }   /* collapse the wordmark to just 🐇 */
-  #dictStatus { display: none; }           /* drop the tokenizer pill when cramped */
 }
 @media (max-width: 420px) {
   .settings { left: 10px; right: 10px; top: auto; bottom: 10px; width: auto; max-height: 55vh; }

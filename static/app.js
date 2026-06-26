@@ -7,7 +7,6 @@
 const linesEl = document.getElementById("lines");
 const popup = document.getElementById("popup");
 const statusEl = document.getElementById("status");
-const dictStatus = document.getElementById("dictStatus");
 const hint = document.getElementById("hint");
 
 let tokenizer = null;
@@ -60,13 +59,10 @@ const isJapanese = s => /[぀-ヿ一-龯々ｦ-ﾟ]/.test(s);
 /* ---- tokenizer init ---------------------------------------------------- */
 kuromoji.builder({ dicPath: "/static/kuromoji/dict" }).build((err, tk) => {
   if (err) {
-    dictStatus.textContent = "tokenizer failed";
     console.error(err);
     return;
   }
   tokenizer = tk;
-  dictStatus.textContent = "tokenizer ready";
-  dictStatus.classList.add("ready");
   // Re-render any lines that arrived before the tokenizer was ready.
   rebuildSentences();
 });
