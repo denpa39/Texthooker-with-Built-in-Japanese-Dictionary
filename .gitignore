@@ -2,6 +2,9 @@
 dict.sqlite
 static/kuromoji/
 
+# Optional VN frequency dataset — download from https://jiten.moe/other (see README)
+jiten_vn.zip
+
 # Python cache
 __pycache__/
 *.pyc
