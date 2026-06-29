@@ -335,6 +335,7 @@ async function showScanPopup(target) {
     foot.className = "popup-foot";
     popup.appendChild(foot);
   }
+  popup.scrollTop = 0;   // new word -> start at the top, don't inherit the last scroll
   positionPopup(target);
   if (foot) {
     const more = popup.scrollHeight > popup.clientHeight + 1;
