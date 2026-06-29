@@ -17,12 +17,6 @@
     "White Rabbit":    { "--bg": "#f7f3e8", "--text": "#38322a", "--accent": "#a87f24", "--accent-2": "#c1556f", "--pos": "#5f8742", "--danger": "#b8392b" }, // cream coat, watch gold, pink eyes (light)
   };
   const CORE_VARS = ["--bg", "--text", "--accent", "--accent-2", "--pos", "--danger"];
-  // Per-theme brand glyph in the toolbar. White Rabbit gets his "I'm late!" pocket
-  // watch so the rabbit stays unique to Alice (the default / rabbit-hole theme).
-  const EMOJI = {
-    "Alice": "🐇", "Caterpillar": "🐛", "Cheshire": "😸",
-    "Mad Hatter": "🎩", "Queen of Hearts": "👑", "White Rabbit": "🕰️",
-  };
   // colours exposed as pickers (label -> css var). --furigana has no preset value
   // (it's derived from the theme in CSS); the picker just lets you override it.
   const PICKERS = [
@@ -36,7 +30,7 @@
     "Rounded":        '"Yu Gothic UI", "BIZ UDPGothic", "Hiragino Maru Gothic ProN", "M PLUS Rounded 1c", sans-serif',
     "Monospace":      '"Cascadia Code", "Consolas", "MS Gothic", monospace',
   };
-  const DEFAULTS = { preset: "Alice", colors: {}, font: "Default (Sans)", fontSize: 30, align: "left" };
+  const DEFAULTS = { preset: "Alice", colors: {}, font: "Default (Sans)", fontSize: 30, align: "left", bold: false, italic: false };
   const ALIGNS = ["left", "center", "right", "justify"];
   // Per alignment: the block's [left, right] margins. "auto" pushes the block to the
   // opposite edge — so left → flush left, right → flush right, center/justify → centred.
@@ -76,7 +70,6 @@
     const root = document.documentElement.style;
     const preset = PRESETS[s.preset] || PRESETS["Alice"];
     CORE_VARS.forEach(v => root.setProperty(v, preset[v]));
-    root.setProperty("--brand-emoji", '"' + (EMOJI[s.preset] || EMOJI["Alice"]) + '"');
     root.removeProperty("--furigana");                 // default: derived from the theme in CSS
     if (s.colors) for (const v in s.colors) root.setProperty(v, s.colors[v]);  // custom overrides
     root.setProperty("--font-family", FONTS[s.font] || FONTS["Default (Sans)"]);
@@ -85,6 +78,8 @@
     const [ml, mr] = ALIGN_MARGIN[s.align] || ALIGN_MARGIN.left;
     root.setProperty("--line-ml", ml);
     root.setProperty("--line-mr", mr);
+    root.setProperty("--font-weight", s.bold ? "700" : "400");
+    root.setProperty("--font-style", s.italic ? "italic" : "normal");
   }
 
   let settings = load();
@@ -145,6 +140,12 @@
     });
     fontSel.addEventListener("change", () => { settings.font = fontSel.value; commit(); });
 
+    // bold / italic reader-text toggles
+    const boldToggle = document.getElementById("boldToggle");
+    const italicToggle = document.getElementById("italicToggle");
+    if (boldToggle) boldToggle.addEventListener("click", () => { settings.bold = !settings.bold; commit(); });
+    if (italicToggle) italicToggle.addEventListener("click", () => { settings.italic = !settings.italic; commit(); });
+
     // text-size slider (re-used from the toolbar) + its numeric readout
     const fontVal = document.getElementById("fontVal");
     const showSize = () => { if (fontVal) fontVal.textContent = settings.fontSize; };
@@ -200,6 +201,8 @@
       showSize();
       if (alignSeg) alignSeg.querySelectorAll("button[data-align]").forEach(b =>
         b.classList.toggle("active", b.dataset.align === settings.align));
+      if (boldToggle) boldToggle.setAttribute("aria-pressed", String(!!settings.bold));
+      if (italicToggle) italicToggle.setAttribute("aria-pressed", String(!!settings.italic));
     }
 
     function commit() { apply(settings); save(settings); syncControls(); }

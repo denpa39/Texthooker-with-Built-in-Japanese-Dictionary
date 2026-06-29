@@ -9,6 +9,13 @@ const popup = document.getElementById("popup");
 const statusEl = document.getElementById("status");
 const hint = document.getElementById("hint");
 
+// Connection status is a plain coloured dot; the label lives only in title/aria-label.
+function setStatus(state, label) {
+  statusEl.className = "status " + state;
+  statusEl.title = label;
+  statusEl.setAttribute("aria-label", label);
+}
+
 let tokenizer = null;
 let showFurigana = false;
 let lookupCache = new Map();
@@ -434,19 +441,14 @@ document.addEventListener("click", e => {
 function connectStream() {
   const es = new EventSource("/events");
   es.onopen = () => {
-    // don't flash "live" over a paused session
-    if (!pauseBtn.classList.contains("active")) {
-      statusEl.textContent = "● live"; statusEl.className = "status live";
-    }
+    // don't flash "ready" over a paused session
+    if (!pauseBtn.classList.contains("active")) setStatus("ready", "Ready");
   };
   es.onmessage = ev => {
     try { addLine(JSON.parse(ev.data).text); } catch (_) {}
   };
   es.onerror = () => {
-    // a routine reconnect, not an error — keep the calm "connecting" styling.
-    if (!pauseBtn.classList.contains("active")) {
-      statusEl.textContent = "connecting…"; statusEl.className = "status connecting";
-    }
+    if (!pauseBtn.classList.contains("active")) setStatus("connecting", "Disconnected — reconnecting…");
     // EventSource auto-reconnects.
   };
 }
@@ -460,9 +462,8 @@ async function refreshPause() {
 }
 function applyPause(paused) {
   pauseBtn.classList.toggle("active", paused);
-  pauseBtn.textContent = paused ? "▶ Resume" : "⏸ Pause";
-  if (paused) { statusEl.textContent = "paused"; statusEl.className = "status paused"; }
-  else { statusEl.textContent = "● live"; statusEl.className = "status live"; }
+  pauseBtn.textContent = paused ? "Resume" : "Pause";
+  setStatus(paused ? "paused" : "ready", paused ? "Paused" : "Ready");
 }
 pauseBtn.addEventListener("click", async () => {
   const want = !pauseBtn.classList.contains("active");
@@ -501,14 +502,14 @@ let clearArmed = false, clearTimer = null;
 function disarmClear() {
   clearArmed = false; clearTimeout(clearTimer);
   clearAllBtn.classList.remove("confirm");
-  clearAllBtn.textContent = "🗑";
+  clearAllBtn.textContent = "Clear";
   clearAllBtn.title = "Clear all lines";
 }
 clearAllBtn.addEventListener("click", () => {
   if (!clearArmed) {                       // first click: arm + ask
     clearArmed = true;
     clearAllBtn.classList.add("confirm");
-    clearAllBtn.textContent = "🗑?";
+    clearAllBtn.textContent = "Clear?";
     clearAllBtn.title = "Click again to clear everything";
     clearTimer = setTimeout(disarmClear, 2500);
     return;

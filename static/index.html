@@ -9,24 +9,24 @@
 </head>
 <body>
 <header id="toolbar">
-  <span class="brand"><span class="brand-emoji" aria-hidden="true"></span><span class="brand-text">&nbsp;Down&nbsp;the&nbsp;Rabbit&nbsp;Hole</span></span>
-  <span id="status" class="status connecting" title="connection status">connecting…</span>
+  <span class="brand"><span class="brand-text">Down&nbsp;the&nbsp;Rabbit&nbsp;Hole</span></span>
+  <span id="status" class="status connecting" role="status" title="Connecting…" aria-label="Connecting"></span>
   <span class="spacer"></span>
-  <button id="pauseBtn" title="Pause / resume clipboard capture">⏸ Pause</button>
-  <button id="furiBtn" title="Toggle furigana readings">あ Furigana</button>
+  <button id="pauseBtn" title="Pause / resume clipboard capture">Pause</button>
+  <button id="furiBtn" title="Toggle furigana readings">Furigana</button>
   <div id="alignSeg" class="seg" role="group" aria-label="Text alignment">
     <button data-align="left" title="Align left" aria-label="Align left"><svg viewBox="0 0 16 16" aria-hidden="true"><g fill="currentColor"><rect x="2" y="2.5" width="11" height="1.6" rx=".8"/><rect x="2" y="6" width="7" height="1.6" rx=".8"/><rect x="2" y="9.5" width="11" height="1.6" rx=".8"/><rect x="2" y="13" width="6" height="1.6" rx=".8"/></g></svg></button>
     <button data-align="center" title="Center" aria-label="Center"><svg viewBox="0 0 16 16" aria-hidden="true"><g fill="currentColor"><rect x="2.5" y="2.5" width="11" height="1.6" rx=".8"/><rect x="4.5" y="6" width="7" height="1.6" rx=".8"/><rect x="2.5" y="9.5" width="11" height="1.6" rx=".8"/><rect x="5" y="13" width="6" height="1.6" rx=".8"/></g></svg></button>
     <button data-align="right" title="Align right" aria-label="Align right"><svg viewBox="0 0 16 16" aria-hidden="true"><g fill="currentColor"><rect x="3" y="2.5" width="11" height="1.6" rx=".8"/><rect x="7" y="6" width="7" height="1.6" rx=".8"/><rect x="3" y="9.5" width="11" height="1.6" rx=".8"/><rect x="8" y="13" width="6" height="1.6" rx=".8"/></g></svg></button>
     <button data-align="justify" title="Justify" aria-label="Justify"><svg viewBox="0 0 16 16" aria-hidden="true"><g fill="currentColor"><rect x="2" y="2.5" width="12" height="1.6" rx=".8"/><rect x="2" y="6" width="12" height="1.6" rx=".8"/><rect x="2" y="9.5" width="12" height="1.6" rx=".8"/><rect x="2" y="13" width="12" height="1.6" rx=".8"/></g></svg></button>
   </div>
-  <button id="setBtn" title="Appearance: theme, colours, font">⚙ Theme</button>
+  <button id="setBtn" title="Appearance: theme, colours, font">Theme</button>
   <label class="fontctl">A
     <input id="fontRange" type="range" min="16" max="56" step="1" value="30" aria-label="Reader text size">
     <output id="fontVal">30</output>
   </label>
-  <button id="clearBtn" title="Undo — remove the most recent line" aria-label="Undo last line">⌫</button>
-  <button id="clearAllBtn" class="icon-btn" title="Clear all lines" aria-label="Clear all lines">🗑</button>
+  <button id="clearBtn" title="Undo — remove the most recent line" aria-label="Undo last line">Undo</button>
+  <button id="clearAllBtn" class="icon-btn" title="Clear all lines" aria-label="Clear all lines">Clear</button>
 </header>
 
 <aside id="settings" class="settings hidden" aria-label="Appearance settings">
@@ -37,6 +37,10 @@
   <div id="colorRow" class="colors"></div>
   <div class="set-label">Font (use the A slider for size)</div>
   <select id="fontSelect"></select>
+  <div class="style-toggles">
+    <button id="boldToggle" class="style-toggle" title="Toggle bold reader text" aria-pressed="false"><b>B</b></button>
+    <button id="italicToggle" class="style-toggle" title="Toggle italic reader text" aria-pressed="false"><i>I</i></button>
+  </div>
   <button id="setReset" class="set-reset">Reset to default</button>
 </aside>
 
