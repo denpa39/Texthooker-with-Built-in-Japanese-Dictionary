@@ -1,4 +1,4 @@
-# 🐇 Down the Rabbit Hole
+#Down the Rabbit Hole
 
 *Copy a line of Japanese, fall in, and read your way through.* A visual-novel
 **texthooker** with a **built-in offline Japanese→English dictionary**.
