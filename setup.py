@@ -32,6 +32,9 @@ DB_PATH = os.path.join(BASE_DIR, "dict.sqlite")
 
 KUROMOJI_VERSION = "0.1.2"
 KUROMOJI_CDN = f"https://cdn.jsdelivr.net/npm/kuromoji@{KUROMOJI_VERSION}"
+# Saved without the .gz suffix (content stays gzipped; kuromoji's loader always
+# gunzips). Download managers like IDM hijack *.gz URLs from the app's webview
+# and spam download dialogs — a plain .dat name sails past them.
 KUROMOJI_DICT_FILES = [
     "base.dat.gz", "cc.dat.gz", "check.dat.gz", "tid.dat.gz", "tid_map.dat.gz",
     "tid_pos.dat.gz", "unk.dat.gz", "unk_char.dat.gz", "unk_compat.dat.gz",
@@ -91,9 +94,16 @@ def setup_kuromoji(force=False):
     else:
         print("  kuromoji.js already present")
 
+    # Point the loader at the .gz-less filenames we save below.
+    with open(js_path, encoding="utf-8") as f:
+        js = f.read()
+    if ".dat.gz" in js:
+        with open(js_path, "w", encoding="utf-8") as f:
+            f.write(js.replace(".dat.gz", ".dat"))
+
     os.makedirs(KUROMOJI_DICT_DIR, exist_ok=True)
     for name in KUROMOJI_DICT_FILES:
-        dest = os.path.join(KUROMOJI_DICT_DIR, name)
+        dest = os.path.join(KUROMOJI_DICT_DIR, name[:-3])
         if not force and os.path.isfile(dest):
             continue
         download(f"{KUROMOJI_CDN}/dict/{name}", dest)
