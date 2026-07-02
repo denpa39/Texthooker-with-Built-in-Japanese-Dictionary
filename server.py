@@ -508,7 +508,7 @@ CONTENT_TYPES = {
     ".css": "text/css; charset=utf-8",
     ".json": "application/json; charset=utf-8",
     ".ico": "image/x-icon",
-    ".gz": "application/octet-stream",  # kuromoji *.dat.gz must NOT be re-encoded
+    ".gz": "application/gzip",  # kuromoji *.dat.gz: gzip MIME type, not octet-stream (prevents download dialog)
 }
 
 
