@@ -97,7 +97,7 @@ with `--freq`.
   is worth mining; green = common in visual novels.
 - **Anki export** — the ★ button on any entry adds a card (word, reading, meanings,
   source sentence) via [AnkiConnect](https://ankiweb.net/shared/info/2055492159).
-  Deck name is configurable (Theme → Study), the note type is created automatically,
+  Deck name is configurable (Settings → Study), the note type is created automatically,
   a one-time "Anki ✓ / Anki –" toolbar indicator shows whether Anki is reachable, and
   a duplicate card answers with "dup" instead of a generic error.
 - **Session persistence & export** — lines survive a page reload, and **Export** saves
@@ -138,16 +138,16 @@ with `--freq`.
 | **Pause** / **Resume** | Stop/continue capture (clipboard + websocket) |
 | **Furigana** | Show readings above kanji |
 | ▤ alignment icons | Text alignment — left, center, right, or justify |
-| **Theme** | Opens the Appearance panel (themes, colours, font, bold/italic, spacing) |
-| A slider | Reader font size |
+| **Settings** | Opens the settings panel (themes, colours, font, text size, bold/italic, spacing, Anki deck) |
+| A slider | Reader font size (also in Settings → Text size) |
 | **Export** | Download the session as a .txt file |
 | **Undo** | Remove the most recent line |
 | **Clear** | Clear all lines (click twice to confirm) |
 | chars counter | Characters read this session · reading speed (chars/hr) |
 
-### Appearance panel
+### Settings panel
 
-Click **Theme** to open it:
+Click **Settings** to open it:
 
 - **Theme** — six Wonderland palettes (Alice, Caterpillar, Cheshire, Mad Hatter, Queen
   of Hearts, White Rabbit). Picking one recolours everything — toolbar, popup, reader,
