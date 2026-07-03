@@ -149,17 +149,27 @@
     if (boldToggle) boldToggle.addEventListener("click", () => { settings.bold = !settings.bold; commit(); });
     if (italicToggle) italicToggle.addEventListener("click", () => { settings.italic = !settings.italic; commit(); });
 
-    // text-size slider (re-used from the toolbar) + its numeric readout
+    // Text-size sliders: the toolbar's A slider AND the panel's "Text size" row
+    // (the toolbar one hides on narrow windows, so the panel keeps it reachable).
+    // Both drive the same setting and stay in sync.
+    const sizeRange2 = document.getElementById("fontRange2");
     const fontVal = document.getElementById("fontVal");
-    const showSize = () => { if (fontVal) fontVal.textContent = settings.fontSize; };
-    if (sizeRange) {
-      sizeRange.addEventListener("input", () => {
-        settings.fontSize = +sizeRange.value;
-        document.documentElement.style.setProperty("--font-size", sizeRange.value + "px");
+    const fontVal2 = document.getElementById("fontVal2");
+    const showSize = () => {
+      if (fontVal) fontVal.textContent = settings.fontSize;
+      if (fontVal2) fontVal2.textContent = settings.fontSize;
+      if (sizeRange) sizeRange.value = settings.fontSize;
+      if (sizeRange2) sizeRange2.value = settings.fontSize;
+    };
+    [sizeRange, sizeRange2].forEach(r => {
+      if (!r) return;
+      r.addEventListener("input", () => {
+        settings.fontSize = +r.value;
+        document.documentElement.style.setProperty("--font-size", r.value + "px");
         showSize();
         save(settings);
       });
-    }
+    });
 
     // spacing sliders (line height / furigana size)
     const lhRange = document.getElementById("lineHeightRange");
