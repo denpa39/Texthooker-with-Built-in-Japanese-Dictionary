@@ -10,21 +10,20 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 ## Remaining ideas
 
 - **Word audio** — 🔊 button, Yomitan-style JapanesePod101 URL. Needs internet; optional.
-- **Known-words: "assume top-N frequency known" bulk-dim** — the one part of
-  known-words v2 not built (needs frequency data client-side, or a `/known-topn`
-  route server-side).
 
 ## Done (2026-07-02 sweep, trimmed 07-03 per user feedback)
 
 Kanji info cards (KANJIDIC2, `/kanji`), hide-names popup toggle, Anki polish
-(configurable deck + toolbar indicator + dup feedback), known-words
-import/export, manual lookup box (romaji accepted), websocket input
-(Textractor :6677 / Agent :9001, `--ws`), server-side session log (`logs/`),
-LAN mode (`--lan` + responsive pass), PyInstaller packaging (`build_exe.bat`),
-run.bat closes its window on clean quit.
+(configurable deck + toolbar indicator + dup feedback), manual lookup box
+(romaji accepted), websocket input (Textractor :6677 / Agent :9001, `--ws`),
+server-side session log (`logs/`), LAN mode (`--lan` + responsive pass),
+PyInstaller packaging (`build_exe.bat`), run.bat closes its window on clean
+quit, window close hard-exits the process (`os._exit`), export via server to
+`exports/` (WebView2 can't blob-download), stats counter in English.
 
 Built then REMOVED on user request (don't re-add without asking): Tanaka example
-sentences, pitch-accent LH contour graph (back to ⬇n), per-line coverage %,
+sentences, the ENTIRE pitch-accent feature (chip + Kanjium table), the ENTIRE
+known-words feature (marking, dimming, import/export), per-line coverage %,
 furigana-on-unknown-only (back to plain on/off).
 
 ## Known loose ends

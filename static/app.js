@@ -30,26 +30,6 @@ function saveStudy() {
   try { localStorage.setItem(STUDY_KEY, JSON.stringify(study)); } catch (_) {}
 }
 
-/* ---- known-word tracking (persisted) ----------------------------------- */
-const KNOWN_KEY = "vntex-known";
-let knownWords;
-try { knownWords = new Set(JSON.parse(localStorage.getItem(KNOWN_KEY)) || []); }
-catch (_) { knownWords = new Set(); }
-function saveKnown() {
-  try { localStorage.setItem(KNOWN_KEY, JSON.stringify([...knownWords])); } catch (_) {}
-  updateKnownCount();
-}
-function refreshKnown(term) {
-  document.querySelectorAll(".token.word").forEach(sp => {
-    if (!term || sp.dataset.term === term)
-      sp.classList.toggle("known", knownWords.has(sp.dataset.term));
-  });
-}
-function updateKnownCount() {
-  const el = document.getElementById("knownCount");
-  if (el) el.textContent = knownWords.size.toLocaleString() + " known words";
-}
-
 /* ---- session persistence + reading stats ------------------------------- */
 const SESSION_KEY = "vntex-session";
 let sessionChars = 0;    // characters read since this page loaded (drives 字/時)
@@ -71,8 +51,8 @@ function bumpStats(text) {
   sessionChars += chars;
   const hours = (Date.now() - sessionStart) / 3600000;
   const rate = hours > 0.005 ? Math.round(sessionChars / hours) : 0;
-  statsEl.textContent = sessionChars.toLocaleString() + "字" +
-                        (rate ? " · " + rate.toLocaleString() + "字/時" : "");
+  statsEl.textContent = sessionChars.toLocaleString() + " chars" +
+                        (rate ? " · " + rate.toLocaleString() + " chars/hr" : "");
 }
 
 /* ---- POS abbreviation expansion (common JMdict tags) ------------------- */
@@ -214,7 +194,6 @@ function buildSentence(text) {
       span.dataset.pos = t.pos || "";
       span.dataset.jreading = (t.reading && t.reading !== "*") ? t.reading : "";
       span.dataset.off = String((t.word_position || 1) - 1);  // start index in the line
-      if (knownWords.has(base)) span.classList.add("known");
 
       if (study.furi !== "off" && hasKanji(surface) && t.reading && t.reading !== "*") {
         const ruby = document.createElement("ruby");
@@ -454,8 +433,7 @@ async function ensureAnki() {
 async function addToAnki(c, sentence, btn) {
   const entry = c.entry;
   const word = (entry.k && entry.k[0]) || (entry.r && entry.r[0]) || c.matched;
-  const reading = (c.mr || (entry.r && entry.r[0]) || "") +
-                  (c.pitch != null ? ` [${c.pitch}]` : "");
+  const reading = c.mr || (entry.r && entry.r[0]) || "";
   const meaning = (entry.s || []).slice(0, 3)
     .map((s, i) => (i + 1) + ". " + s.gloss.join("; ")).join("<br>");
   try {
@@ -527,14 +505,6 @@ function renderCandidate(c, sentence) {
   const readingShown = c.mr || (entry.r && entry.r[0]);
   if (!allUk && hasKanji && readingShown) {
     head.appendChild(plainReading(readingShown));
-  }
-  // pitch-accent chip (Kanjium): 0 = heiban, n = downstep after mora n
-  if (c.pitch != null) {
-    const p = document.createElement("span");
-    p.className = "pitch";
-    p.textContent = "⬇" + String(c.pitch).split(",").join("·");
-    p.title = "pitch accent (0 = flat, n = drop after mora n)";
-    head.appendChild(p);
   }
   // VN-frequency chip: how common this word is in visual novels
   if (typeof entry.vr === "number") {
@@ -626,7 +596,7 @@ function renderCandidate(c, sentence) {
 }
 
 // Shared popup body used by the hover/pin path and the manual lookup box.
-// opts: {sentence, emptyLabel, knownTerm, rerender} — rerender is called when the
+// opts: {sentence, emptyLabel, rerender} — rerender is called when the
 // hide-names toggle flips, so the same lookup re-renders with the new filter.
 function renderPopupBody(cands, opts) {
   popup.innerHTML = "";
@@ -669,23 +639,6 @@ function renderPopupBody(cands, opts) {
     });
     popup.appendChild(nt);
   }
-  // Pinned popup: mark the word known/unknown (known words dim in the reader).
-  if (pinned && opts.knownTerm) {
-    const term = opts.knownTerm;
-    const kb = document.createElement("button");
-    kb.className = "known-btn" + (knownWords.has(term) ? " on" : "");
-    kb.textContent = knownWords.has(term) ? "✓ known — click to unmark" : "mark 「" + term + "」 as known";
-    kb.addEventListener("click", ev => {
-      ev.stopPropagation();
-      if (knownWords.has(term)) knownWords.delete(term);
-      else knownWords.add(term);
-      saveKnown();
-      refreshKnown(term);
-      kb.classList.toggle("on", knownWords.has(term));
-      kb.textContent = knownWords.has(term) ? "✓ known — click to unmark" : "mark 「" + term + "」 as known";
-    });
-    popup.appendChild(kb);
-  }
   return shown.length;
 }
 
@@ -722,7 +675,6 @@ async function showScanPopup(target) {
   const n = renderPopupBody(cands, {
     sentence: line.dataset.raw,
     emptyLabel: target.dataset.surface || target.dataset.term,
-    knownTerm: target.dataset.term,
     rerender: () => showScanPopup(target),
   });
   finishPopup(target, !pinned && n > 0);
@@ -1001,8 +953,7 @@ lookupBox.addEventListener("keydown", async e => {
   popup.classList.add("pinned");
   activeWord = null;
   const rerender = () => {
-    renderPopupBody(cands, { sentence: text, emptyLabel: text,
-                             knownTerm: base || text, rerender });
+    renderPopupBody(cands, { sentence: text, emptyLabel: text, rerender });
     finishPopup(lookupBox, false);
   };
   rerender();
@@ -1067,7 +1018,7 @@ exportBtn.addEventListener("click", async () => {
   setTimeout(() => { exportBtn.textContent = "Export"; }, 2000);
 });
 
-/* ---- Study section of the settings panel (Anki deck, known-words tools) -- */
+/* ---- Study section of the settings panel (Anki deck) --------------------- */
 (function initStudyPanel() {
   const deckInput = document.getElementById("deckInput");
   deckInput.value = study.deck;
@@ -1077,35 +1028,4 @@ exportBtn.addEventListener("click", async () => {
     deckInput.value = study.deck;
     saveStudy();
   });
-
-  document.getElementById("knownExport").addEventListener("click", () => {
-    const blob = new Blob([[...knownWords].join("\n") + "\n"],
-                          { type: "text/plain;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "known-words.txt";
-    a.click();
-    URL.revokeObjectURL(a.href);
-  });
-
-  const knownFile = document.getElementById("knownFile");
-  document.getElementById("knownImport").addEventListener("click", () => knownFile.click());
-  knownFile.addEventListener("change", async () => {
-    const file = knownFile.files[0];
-    if (!file) return;
-    const text = await file.text();
-    let words;
-    try { words = JSON.parse(text); }                       // our export, or a JSON array
-    catch (_) { words = text.split(/\r?\n/); }              // plain one-word-per-line
-    if (!Array.isArray(words)) words = [];
-    const before = knownWords.size;
-    words.map(w => String(w).trim()).filter(Boolean).forEach(w => knownWords.add(w));
-    saveKnown();
-    refreshKnown();
-    const el = document.getElementById("knownCount");
-    if (el) el.textContent = `+${knownWords.size - before} imported · ${knownWords.size.toLocaleString()} known words`;
-    knownFile.value = "";
-  });
-
-  updateKnownCount();
 })();

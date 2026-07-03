@@ -50,9 +50,6 @@ JMDICT_RELEASES_API = "https://api.github.com/repos/scriptin/jmdict-simplified/r
 # Auto-downloaded as the VN-flavored default when no --freq is given.
 INNOCENT_URL = ("https://raw.githubusercontent.com/MarvNC/yomitan-dictionaries/"
                 "master/japanese/freq/innocent_corpus/innocent_corpus.zip")
-# Kanjium pitch-accent data (term \t reading \t accent), CC BY-SA 4.0.
-KANJIUM_URL = ("https://raw.githubusercontent.com/mifunetoshiro/kanjium/"
-               "master/data/source_files/raw/accents.txt")
 # KANJIDIC2 (readings/meanings/strokes/grade/JLPT per kanji), EDRDG licence.
 KANJIDIC2_URL = "https://www.edrdg.org/kanjidic/kanjidic2.xml.gz"
 # Textractor (GPL-3.0) — its CLI is embedded so the app can hook games directly.
@@ -93,7 +90,7 @@ def fetch_bytes(url, headers=None):
 
 # --------------------------------------------------------------------------- #
 def setup_kuromoji(force=False):
-    print("[1/7] kuromoji tokenizer")
+    print("[1/6] kuromoji tokenizer")
     js_path = os.path.join(KUROMOJI_DIR, "kuromoji.js")
     if force or not os.path.isfile(js_path):
         download(f"{KUROMOJI_CDN}/build/kuromoji.js", js_path)
@@ -363,7 +360,7 @@ def build_db(jmdict_json_bytes, vn_freq=None):
 
 
 def setup_dictionary(common, force=False, freq_zip=None, innocent=False):
-    print("[2/7] JMdict dictionary + frequency")
+    print("[2/6] JMdict dictionary + frequency")
     if not force and os.path.isfile(DB_PATH):
         print("  dict.sqlite already present (use --force to rebuild)\n")
         return
@@ -447,53 +444,11 @@ def build_names(js_bytes):
     print("  names ready\n")
 
 
-def setup_pitch(force=False):
-    """Kanjium pitch-accent table: pitch(term, reading, accent). Optional —
-    lookups work without it; the popup just shows no accent numbers."""
-    print("[4/7] pitch accent (Kanjium)")
-    if not os.path.isfile(DB_PATH):
-        print("  build the dictionary first.\n")
-        return
-    con = sqlite3.connect(DB_PATH)
-    if not force:
-        has = con.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='pitch'").fetchone()
-        if has:
-            con.close()
-            print("  pitch accents already present (use --force to rebuild)\n")
-            return
-    try:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "accents.txt")
-            download(KANJIUM_URL, path)
-            rows = []
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    parts = line.rstrip("\n").split("\t")
-                    if len(parts) != 3 or not parts[2]:
-                        continue
-                    term, reading, accent = parts
-                    rows.append((term, reading or term, accent))
-        cur = con.cursor()
-        cur.execute("PRAGMA journal_mode = OFF")
-        cur.execute("PRAGMA synchronous = OFF")
-        cur.execute("DROP TABLE IF EXISTS pitch")
-        cur.execute("CREATE TABLE pitch (term TEXT, reading TEXT, accent TEXT)")
-        cur.executemany("INSERT INTO pitch VALUES (?,?,?)", rows)
-        cur.execute("CREATE INDEX idx_pitch ON pitch(term)")
-        con.commit()
-        print(f"  {len(rows):,} pitch entries ready\n")
-    except Exception as e:
-        print(f"  pitch accent unavailable ({e}) — skipping (lookups still work)\n")
-    finally:
-        con.close()
-
-
 def setup_kanji(force=False):
     """KANJIDIC2 per-kanji info: kanji(literal, json) with on/kun readings,
     meanings, stroke count, grade, JLPT level, frequency. Optional — the popup's
     kanji cards just don't appear without it."""
-    print("[5/7] kanji info (KANJIDIC2)")
+    print("[4/6] kanji info (KANJIDIC2)")
     if not os.path.isfile(DB_PATH):
         print("  build the dictionary first.\n")
         return
@@ -555,7 +510,7 @@ def setup_kanji(force=False):
 def setup_textractor(force=False):
     """Download the Textractor zip and extract it into textractor/ so the app can
     spawn TextractorCLI.exe itself (the in-app 'Attach' button)."""
-    print("[6/7] Textractor (embedded game hooking)")
+    print("[5/6] Textractor (embedded game hooking)")
     if not force and (os.path.isfile(os.path.join(TEXTRACTOR_DIR, "x64", "TextractorCLI.exe"))
                       or os.path.isfile(os.path.join(TEXTRACTOR_DIR, "x86", "TextractorCLI.exe"))):
         print("  Textractor already present (use --force to redownload)\n")
@@ -590,7 +545,7 @@ def setup_textractor(force=False):
 def setup_pywebview():
     """Best-effort install of pywebview for the standalone app window. The app
     falls back to the browser without it, so a failure here is not fatal."""
-    print("[7/7] app window (pywebview)")
+    print("[6/6] app window (pywebview)")
     try:
         import webview  # noqa: F401
         print("  pywebview already installed\n")
@@ -614,7 +569,7 @@ def setup_pywebview():
 
 
 def setup_names(force=False):
-    print("[3/7] JMnedict names")
+    print("[3/6] JMnedict names")
     if not os.path.isfile(DB_PATH):
         print("  build the dictionary first.\n")
         return
@@ -669,7 +624,6 @@ def main():
                      innocent=args.innocent)
     if not args.no_names:
         setup_names(force=args.force)
-    setup_pitch(force=args.force)
     setup_kanji(force=args.force)
     if not args.no_textractor:
         setup_textractor(force=args.force)

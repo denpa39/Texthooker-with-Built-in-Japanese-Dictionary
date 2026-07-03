@@ -86,8 +86,6 @@ with `--freq`.
   grammatical condition chaining), plus auxiliary chains it leaves to multi-word lookup
   (〜てみる, 〜ていく, 〜てくれる, 〜にくい/やすい…). 食べさせられていた, わからん,
   高くなさそう, お読みになります — all reach their dictionary form.
-- **Pitch accent** on every entry that has one (Kanjium data): ⬇0 = flat, ⬇n = downstep
-  after mora n.
 - **Kanji info cards (KANJIDIC2)** — in a pinned popup, click any kanji in the headword
   for its meanings, on/kun readings, stroke count, school grade, JLPT level and
   frequency rank.
@@ -97,15 +95,14 @@ with `--freq`.
   hooking needed. Romaji works too (tabemasu → たべます).
 - **VN frequency chip** (№1,638) in the popup so you can tell at a glance whether a word
   is worth mining; green = common in visual novels.
-- **Anki export** — the ★ button on any entry adds a card (word, reading + pitch,
-  meanings, source sentence) via [AnkiConnect](https://ankiweb.net/shared/info/2055492159).
+- **Anki export** — the ★ button on any entry adds a card (word, reading, meanings,
+  source sentence) via [AnkiConnect](https://ankiweb.net/shared/info/2055492159).
   Deck name is configurable (Theme → Study), the note type is created automatically,
   a one-time "Anki ✓ / Anki –" toolbar indicator shows whether Anki is reachable, and
   a duplicate card answers with "dup" instead of a generic error.
-- **Known-word tracking** — pin a word and mark it known; known words dim in the reader
-  so unknown vocabulary stands out. Import/export the list as a .txt (Theme → Study).
 - **Session persistence & export** — lines survive a page reload, and **Export** saves
-  the session as a .txt. A live counter shows characters read and reading speed (字/時).
+  the session to `exports\` and reveals it in Explorer. A live counter shows characters
+  read and reading speed (chars/hr).
   The server also appends every line to a per-day file in `logs/` (named after the
   hooked game), so nothing is lost to a browser-storage wipe.
 - **WebSocket input** — reads text straight from Textractor's websocket plugin (:6677)
@@ -146,7 +143,7 @@ with `--freq`.
 | **Export** | Download the session as a .txt file |
 | **Undo** | Remove the most recent line |
 | **Clear** | Clear all lines (click twice to confirm) |
-| 字 counter | Characters read this session · reading speed (字/時) |
+| chars counter | Characters read this session · reading speed (chars/hr) |
 
 ### Appearance panel
 
@@ -232,6 +229,5 @@ re-downloading the app.
   (`deinflect_data.py`; if you redistribute this project, GPL-3.0 terms apply to it).
 - Game hooking: **Textractor** — GPL-3.0 (downloaded to `textractor/`, driven as a
   separate process).
-- Pitch accent: **Kanjium** — CC BY-SA 4.0.
 - VN frequency: **jiten.moe** — CC BY-SA 4.0.
 - Kanji info: **KANJIDIC2** (EDRDG licence).

@@ -309,34 +309,13 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 .entry .inflect { font-size: 12px; font-style: italic; color: var(--accent); margin-bottom: 3px; }
 .entry.name .hw { color: var(--accent); }
 
-/* pitch-accent + VN-frequency chips in the entry header */
-.entry .pitch {
-  font-size: 11px; color: var(--accent-2);
-  border: 1px solid color-mix(in srgb, var(--accent-2) 45%, var(--bg));
-  border-radius: 3px; padding: 0 4px;
-  font-variant-numeric: tabular-nums;
-}
+/* VN-frequency chip in the entry header */
 .entry .freq {
   font-size: 10px; color: var(--muted);
   border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
   font-variant-numeric: tabular-nums;
 }
 .entry .freq.hot { color: var(--pos); border-color: color-mix(in srgb, var(--pos) 50%, var(--bg)); }
-
-/* pinned-popup footer: mark the hovered word known/unknown */
-.known-btn {
-  display: block; width: 100%; margin-top: 10px;
-  background: var(--panel); color: var(--muted);
-  border: 1px solid var(--line); border-radius: 3px;
-  padding: 6px; cursor: pointer; font-size: 12px;
-  transition: border-color .15s, color .15s;
-}
-.known-btn:hover { border-color: var(--pos); color: var(--pos); }
-.known-btn.on { color: var(--pos); border-color: color-mix(in srgb, var(--pos) 55%, var(--bg)); }
-
-/* words the user marked as known recede so unknown words stand out */
-.token.word.known { opacity: .58; }
-.token.word.known:hover, .token.word.known:focus-visible { opacity: 1; }
 
 .entry .name-tag {
   font-size: 10px; color: var(--accent); border: 1px solid var(--accent);
@@ -461,21 +440,13 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 #lookupBox::placeholder { color: color-mix(in srgb, var(--on-accent) 60%, var(--accent)); }
 #lookupBox:focus { outline: none; background: var(--on-accent); color: var(--accent); }
 
-/* Study section of the settings panel (Anki deck, known-words tools). */
+/* Study section of the settings panel (Anki deck). */
 .set-text { display: flex; align-items: center; gap: 8px; color: var(--muted); }
 .set-text input {
   flex: 1; min-width: 0;
   background: var(--panel); color: var(--text);
   border: 1px solid var(--line); border-radius: 3px; padding: 6px 8px; font-size: 13px;
 }
-.known-tools { display: flex; align-items: center; gap: 7px; margin-top: 8px; }
-.known-tools .known-count { flex: 1; color: var(--muted); font-size: 12px; }
-.known-tools button {
-  background: var(--panel); color: var(--text);
-  border: 1px solid var(--line); border-radius: 3px; padding: 5px 9px;
-  cursor: pointer; font-size: 12px; transition: border-color .15s, color .15s;
-}
-.known-tools button:hover { border-color: var(--accent); color: var(--accent); }
 
 /* Responsive — narrow windows / phones (LAN mode) ---------------------- */
 @media (max-width: 700px) {

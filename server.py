@@ -531,40 +531,6 @@ def lookup(term, pos=None, reading=None):
     return [c["entry"] for c in cands]
 
 
-def _attach_pitch(cands):
-    """Add Kanjium accent numbers to the top candidates (no-op without the table).
-    Matched per (headword, reading) pair so homographs get the right accent."""
-    if not cands:
-        return
-    db = get_db()
-    heads = {}
-    for c in cands:
-        e = c["entry"]
-        head = (e.get("k") or e.get("r") or [None])[0]
-        if head:
-            heads.setdefault(head, []).append(c)
-    try:
-        placeholders = ",".join("?" * len(heads))
-        rows = db.execute(
-            f"SELECT term, reading, accent FROM pitch WHERE term IN ({placeholders})",
-            tuple(heads)).fetchall()
-    except sqlite3.OperationalError:
-        return
-    by_term = {}
-    for term, reading, accent in rows:
-        by_term.setdefault(term, {})[to_hiragana(reading)] = accent
-    for head, group in heads.items():
-        readings = by_term.get(head)
-        if not readings:
-            continue
-        for c in group:
-            e = c["entry"]
-            shown = c.get("mr") or (e.get("r") or [head])[0]
-            acc = readings.get(to_hiragana(shown))
-            if acc is not None:
-                c["pitch"] = acc
-
-
 @functools.lru_cache(maxsize=4096)
 def scan(text, pos=None, reading=None, base=None, surface=None):
     """Longest-match scan from the start of `text`, returning ranked candidates
@@ -631,9 +597,7 @@ def scan(text, pos=None, reading=None, base=None, surface=None):
                         break
 
     cands.sort(key=lambda c: _sort_key(c, tok_len, pos, reading_h, pref))
-    cands = cands[:12]
-    _attach_pitch(cands)
-    return cands
+    return cands[:12]
 
 
 def kanji_info(ch):
@@ -936,7 +900,9 @@ def main():
             print("Window closed. Stopping.")
             hooker.detach()
             server.shutdown()
-            return
+            # Hard-exit: any straggler thread (SSE handler, pywebview internals)
+            # would otherwise keep a zombie python process squatting the port.
+            os._exit(0)
         except ImportError:
             print("(pywebview not installed — falling back to the browser. "
                   "For the app window:  python -m pip install pywebview)")
@@ -953,7 +919,7 @@ def main():
     except KeyboardInterrupt:
         print("\nStopping.")
         hooker.detach()
-        server.shutdown()
+        os._exit(0)   # same hard exit as the window path — no straggler threads
 
 
 if __name__ == "__main__":
