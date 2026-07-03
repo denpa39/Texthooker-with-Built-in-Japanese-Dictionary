@@ -449,15 +449,24 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 }
 
 /* Responsive — narrow windows / phones (LAN mode) ---------------------- */
+/* Once the toolbar has to wrap, the .spacer makes rows ragged (it inflates
+   whichever row it lands on). Below ~900px: drop it, tighten padding, and
+   centre-pack the rows so multi-row looks deliberate rather than broken. */
+@media (max-width: 900px) {
+  #toolbar { padding: 8px 12px; gap: 6px 8px; justify-content: center; }
+  .spacer { display: none; }
+}
 @media (max-width: 700px) {
   .brand-text { display: none; }
   .fontctl { display: none; }
-  #lookupBox { width: 90px; }
+  #toolbar button { padding: 5px 8px; font-size: 12px; }
+  #lookupBox { width: 90px; padding: 4px 7px; font-size: 12px; }
   #lines { padding: 16px 14px 40vh; }
   .popup { font-size: 14px; }
 }
-@media (max-width: 560px) {
-  #toolbar { gap: 8px; padding: 8px 10px; }
+@media (max-width: 420px) {
+  #toolbar { gap: 5px 6px; padding: 6px 8px; }
+  .stats { display: none; }   /* the counter is the first thing to go on a phone */
 }
 @media (max-width: 420px) {
   .settings { left: 10px; right: 10px; top: auto; bottom: 10px; width: auto; max-height: 55vh; }
