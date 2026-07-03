@@ -725,9 +725,13 @@ function unpin() {
 
 let activeWord = null;   // the word the popup is currently showing (flicker guard)
 function peek(t) {
-  if (!t || pinned || t === activeWord) return;   // skip re-render of the same word
-  activeWord = t;
+  if (!t || pinned) return;
+  // Cancel any pending hide BEFORE the same-word check: re-entering the word you
+  // just left (within the 180ms hide delay) used to early-return with the timer
+  // still armed, so the popup vanished under a hovering cursor.
   cancelHide();
+  if (t === activeWord) return;   // skip re-render of the same word
+  activeWord = t;
   showScanPopup(t);
 }
 function pin(t) {
