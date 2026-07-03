@@ -34,9 +34,11 @@
   --latest-overlay: color-mix(in srgb, var(--accent) 15%, transparent);
   --toolbar-bg: color-mix(in srgb, var(--bg-soft) 86%, transparent);
   /* Shadows are an elevation cue, conventionally dark — the one value left theme-
-     agnostic on purpose. Softened from .45 so it's airy on light themes; on dark
-     themes it recedes and the popup's 1px border carries the separation. */
-  --shadow: 0 10px 38px rgba(0, 0, 0, .28);
+     agnostic on purpose. Layered: a tight contact shadow + a soft ambient one reads
+     as real paper lift; on dark themes it recedes and the 1px border separates. */
+  --shadow: 0 1px 2px rgba(0, 0, 0, .12), 0 12px 32px rgba(0, 0, 0, .22);
+  --radius: 8px;      /* one corner radius everywhere — surfaces feel of a piece */
+  --serif: "Noto Serif JP", "Yu Mincho", serif;   /* bundled — brand + headwords */
 
   /* typography */
   --font-family: "Segoe UI", system-ui, sans-serif;
@@ -88,14 +90,20 @@ body {
   z-index: 20;
   flex-wrap: wrap;
 }
-.brand { display: inline-flex; align-items: center; font-weight: 700; letter-spacing: .04em; color: var(--on-accent); }
+.brand {
+  display: inline-flex; align-items: center;
+  font-family: var(--serif);
+  font-weight: 700; font-size: 15px;
+  letter-spacing: .06em;
+  color: var(--on-accent);
+}
 .spacer { flex: 1; }
 
 #toolbar button {
   background: transparent;
   color: var(--on-accent);
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: 5px;
   padding: 6px 10px;
   cursor: pointer;
   font-size: 13px;
@@ -168,16 +176,16 @@ body {
   width: 280px;
   max-height: calc(100vh - 76px);
   overflow-y: auto;
-  background: var(--bg);
+  background: var(--bg-soft);
   border: 1px solid var(--line);
-  border-radius: 4px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, .14);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
   padding: 14px 16px 16px;
   font-size: 13px;
 }
 .settings.hidden { display: none; }
 .settings .set-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
-.settings .set-head b { font-size: 14px; }
+.settings .set-head b { font-family: var(--serif); font-size: 14px; letter-spacing: .03em; }
 .settings .set-x {
   background: transparent; border: none; color: var(--muted);
   font-size: 20px; line-height: 1; cursor: pointer; padding: 0 2px;
@@ -246,13 +254,25 @@ body {
   margin-inline: var(--line-ml, auto) var(--line-mr, auto);
   text-align: var(--text-align);  /* left / center / right / justify (toolbar segment) */
   padding: 6px 14px;
-  border-radius: 4px;
+  border-radius: var(--radius);
   transition: background .2s, color .2s;
   position: relative;
 }
 .line:hover { background: var(--hover-overlay); }
 /* the current line reads as a solid filled chip — like the reference's filled CTA */
-.line.latest { background: var(--accent); color: var(--on-accent); }
+.line.latest {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* each hooked line settles in like a typeset row */
+@media (prefers-reduced-motion: no-preference) {
+  .line.latest { animation: line-in .28s ease-out; }
+  @keyframes line-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+  }
+}
 .sentence { word-break: break-word; }
 
 .token { border-radius: 2px; cursor: default; transition: background .1s, color .1s; }
@@ -275,10 +295,10 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
   max-width: min(440px, calc(100vw - 20px));
   max-height: 60vh;
   overflow-y: auto;
-  background: var(--bg);
+  background: var(--bg-soft);
   border: 1px solid var(--line);
-  border-radius: 4px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, .14);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
   padding: 14px 16px;
   font-size: 15px;
   line-height: 1.5;
@@ -287,10 +307,18 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
                              re-enables interaction below. */
 }
 .popup.hidden { display: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .popup:not(.hidden) { animation: popup-in .16s ease-out; }
+  @keyframes popup-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: none; }
+  }
+}
 .entry { padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
 .entry:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
 .entry .head { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
-.entry .head .hw { font-size: 26px; font-weight: 700; color: var(--text); }
+/* headwords set in the bundled Mincho — a dictionary should read like one */
+.entry .head .hw { font-family: var(--serif); font-size: 27px; font-weight: 700; color: var(--text); }
 .entry .reading { font-size: 15px; color: var(--accent-2); }
 .entry .alt { color: var(--muted); font-size: 13px; margin-top: 2px; }
 .sense { margin-top: 7px; }
@@ -309,17 +337,24 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 .entry .inflect { font-size: 12px; font-style: italic; color: var(--accent); margin-bottom: 3px; }
 .entry.name .hw { color: var(--accent); }
 
-/* VN-frequency chip in the entry header */
+/* VN-frequency chip in the entry header — a quiet tinted pill */
 .entry .freq {
   font-size: 10px; color: var(--muted);
-  border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px;
   font-variant-numeric: tabular-nums;
 }
-.entry .freq.hot { color: var(--pos); border-color: color-mix(in srgb, var(--pos) 50%, var(--bg)); }
+.entry .freq.hot {
+  color: var(--pos);
+  background: color-mix(in srgb, var(--pos) 10%, transparent);
+  border-color: color-mix(in srgb, var(--pos) 45%, var(--bg));
+}
 
 .entry .name-tag {
-  font-size: 10px; color: var(--accent); border: 1px solid var(--accent);
-  border-radius: 4px; padding: 1px 5px; margin-left: auto;
+  font-size: 10px; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--bg));
+  border-radius: 999px; padding: 1px 7px; margin-left: auto;
 }
 .entry .mini {
   background: transparent; border: none; color: var(--muted); cursor: pointer;
@@ -338,9 +373,9 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 /* Hint ----------------------------------------------------------------- */
 .hint {
   position: fixed; bottom: 0; left: 0; right: 0;
-  text-align: center; padding: 12px;
-  color: var(--muted); font-size: 13px;
-  background: var(--bg);
+  text-align: center; padding: 13px;
+  color: var(--muted); font-size: 13px; line-height: 1.6;
+  background: color-mix(in srgb, var(--bg-soft) 92%, transparent);
   border-top: 1px solid var(--line);
   pointer-events: none;
 }
@@ -357,7 +392,7 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 .popup-foot {
   position: sticky; bottom: -14px;
   margin: 10px -16px -14px; padding: 7px 16px;
-  background: var(--bg); border-top: 1px solid var(--line);
+  background: var(--bg-soft); border-top: 1px solid var(--line);
   font-size: 11px; color: var(--muted); text-align: center; letter-spacing: .02em;
 }
 /* Clear-all asks once before wiping everything. */
@@ -398,11 +433,12 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 .entry .kj { cursor: pointer; border-radius: 2px; }
 .entry .kj:hover { color: var(--accent); }
 .kanji-card {
-  display: flex; gap: 12px; margin-top: 8px; padding: 10px 12px;
-  background: var(--bg-soft); border: 1px solid var(--line); border-radius: 4px;
+  display: flex; gap: 14px; margin-top: 8px; padding: 10px 12px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg));
+  border: 1px solid var(--line); border-radius: var(--radius);
   font-size: 13px;
 }
-.kj-big { font-size: 44px; line-height: 1.15; color: var(--accent); }
+.kj-big { font-family: var(--serif); font-size: 46px; line-height: 1.15; color: var(--accent); }
 .kj-body { flex: 1; min-width: 0; }
 .kj-mean { color: var(--text); }
 .kj-read { color: var(--muted); margin-top: 3px; }
@@ -410,7 +446,8 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 .kj-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
 .kj-chips span {
   font-size: 10px; color: var(--muted);
-  border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px;
   font-variant-numeric: tabular-nums;
 }
 
