@@ -9,7 +9,7 @@ cd /d "%~dp0"
 python -m PyInstaller --version >nul 2>nul || python -m pip install pyinstaller
 if errorlevel 1 exit /b 1
 
-python -m PyInstaller --noconfirm --onefile --name DownTheRabbitHole server.py
+python -m PyInstaller --noconfirm --onefile --noconsole --name DownTheRabbitHole server.py
 if errorlevel 1 exit /b 1
 python -m PyInstaller --noconfirm --onefile --name RabbitHoleSetup setup.py
 if errorlevel 1 exit /b 1

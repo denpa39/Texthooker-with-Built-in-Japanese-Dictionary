@@ -828,6 +828,19 @@ class Handler(BaseHTTPRequestHandler):
 
 
 # --------------------------------------------------------------------------- #
+def _fatal(msg):
+    """Print AND, when running console-less (pythonw / --noconsole exe), show a
+    message box — otherwise startup errors would be completely invisible."""
+    print(msg)
+    if sys.platform == "win32":
+        try:
+            if ctypes.windll.kernel32.GetConsoleWindow() == 0:
+                ctypes.windll.user32.MessageBoxW(None, msg, "Down the Rabbit Hole", 0x10)
+        except Exception:
+            pass
+    sys.exit(1)
+
+
 def main():
     try:
         sys.stdout.reconfigure(errors="replace")   # never crash printing to a non-UTF-8 console
@@ -853,11 +866,9 @@ def main():
         args.host = "0.0.0.0"
 
     if not os.path.isfile(DB_PATH):
-        print("dict.sqlite not found. Run:  python setup.py")
-        sys.exit(1)
+        _fatal("dict.sqlite not found. Run:  python setup.py")
     if not os.path.isfile(os.path.join(STATIC_DIR, "kuromoji", "kuromoji.js")):
-        print("kuromoji tokenizer missing. Run:  python setup.py")
-        sys.exit(1)
+        _fatal("kuromoji tokenizer missing. Run:  python setup.py")
 
     if sys.platform != "win32":
         print("Warning: clipboard monitoring only works on Windows. "
@@ -887,11 +898,10 @@ def main():
     try:
         server = QuietServer((args.host, args.port), Handler)
     except OSError:
-        print(f"Port {args.port} is already in use — the app is probably already "
-              f"running.\nClose the other window/terminal (or Task Manager -> "
-              f"python) and try again,\nor start with a different port:  "
-              f"python server.py --port 4040")
-        sys.exit(1)
+        _fatal(f"Port {args.port} is already in use — the app is probably already "
+               f"running.\nClose the other window/terminal (or Task Manager -> "
+               f"python) and try again,\nor start with a different port:  "
+               f"python server.py --port 4040")
     # 0.0.0.0 listens everywhere but isn't a browsable address — open localhost.
     url = f"http://{'127.0.0.1' if args.host in ('0.0.0.0', '::') else args.host}:{args.port}/"
     print(f"Down the Rabbit Hole - running at {url}")

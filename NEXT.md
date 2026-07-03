@@ -17,8 +17,9 @@ Kanji info cards (KANJIDIC2, `/kanji`), hide-names popup toggle, Anki polish
 (configurable deck + toolbar indicator + dup feedback), manual lookup box
 (romaji accepted), websocket input (Textractor :6677 / Agent :9001, `--ws`),
 server-side session log (`logs/`), LAN mode (`--lan` + responsive pass),
-PyInstaller packaging (`build_exe.bat`), run.bat closes its window on clean
-quit, window close hard-exits the process (`os._exit`), export via server to
+PyInstaller packaging (`build_exe.bat`, app exe `--noconsole`), run.bat launches
+console-less via pythonw (startup errors -> message box), window close
+hard-exits the process (`os._exit`), export via server to
 `exports/` (WebView2 can't blob-download), stats counter in English.
 
 Built then REMOVED on user request (don't re-add without asking): Tanaka example

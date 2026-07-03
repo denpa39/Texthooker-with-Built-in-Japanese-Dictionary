@@ -1,6 +1,4 @@
 @echo off
-REM Starts Down the Rabbit Hole and opens it in your browser.
-python "%~dp0server.py" %*
-REM Keep the window open only if the server failed (e.g. missing dict.sqlite),
-REM so the error stays readable; a clean quit closes the terminal too.
-if errorlevel 1 pause
+REM Starts Down the Rabbit Hole with no console window — just the app.
+REM (pythonw = console-less Python; startup errors appear as a message box.)
+start "" pythonw "%~dp0server.py" %*
