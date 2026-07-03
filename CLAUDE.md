@@ -73,8 +73,13 @@ next particle, names burying real words).
   deliberate. Windows lets a second bind on a busy port silently route requests to the OLD
   process — this caused hours of "new feature 404s" confusion. Don't remove either.
 - **WebView2 (pywebview) quirks**: no blob downloads (hence server-side `/export`), caches
-  static files (hence `Cache-Control: no-cache` on every response), and misses emoji-range
+  static files (hence `Cache-Control: no-cache` by default), and misses emoji-range
   glyphs (⬇ rendered as tofu — stick to basic chars like ↓ in UI text).
+- **Cache policy is two-tier**: `/static/kuromoji/` and `/static/fonts/` get
+  `max-age=31536000, immutable` (26 MB of never-changing assets — re-fetching them every
+  launch was the main startup cost); everything else stays `no-cache`. Keep new immutable
+  assets under those two dirs. Client `lookupCache` is FIFO-capped (500); server `scan`
+  lru_cache is 1024.
 - Kuromoji dict files are stored gunzip-named `.dat` (still gzipped) — IDM download managers
   hijack `*.gz` URLs from the webview.
 - Frozen (PyInstaller) builds resolve `BASE_DIR` from `sys.executable`; data (static/,

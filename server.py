@@ -531,7 +531,7 @@ def lookup(term, pos=None, reading=None):
     return [c["entry"] for c in cands]
 
 
-@functools.lru_cache(maxsize=4096)
+@functools.lru_cache(maxsize=1024)   # each hit holds ~12 full JSON entries; 1k ≈ plenty for a session
 def scan(text, pos=None, reading=None, base=None, surface=None):
     """Longest-match scan from the start of `text`, returning ranked candidates
     (words via de-inflection + names). `surface` is the tokenizer's surface form of
@@ -632,13 +632,15 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     # -- helpers ----------------------------------------------------------- #
-    def _send_bytes(self, body, content_type, status=200):
+    def _send_bytes(self, body, content_type, status=200, cache=None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        # Always revalidate: the app window (WebView2) otherwise happily serves a
+        # Default no-cache: the app window (WebView2) otherwise happily serves a
         # stale app.js/index.html after an update — "new feature isn't working".
-        self.send_header("Cache-Control", "no-cache")
+        # Immutable assets (kuromoji dict, fonts — ~26 MB) override this so they
+        # aren't re-downloaded and re-parsed on every single startup.
+        self.send_header("Cache-Control", cache or "no-cache")
         self.end_headers()
         self.wfile.write(body)
 
@@ -659,7 +661,12 @@ class Handler(BaseHTTPRequestHandler):
         ctype = CONTENT_TYPES.get(ext, "application/octet-stream")
         with open(full, "rb") as f:
             body = f.read()
-        self._send_bytes(body, ctype)
+        # kuromoji's dictionary and the bundled fonts never change between setups —
+        # let the webview keep them for a year instead of refetching 26 MB per launch.
+        rel = rel_path.replace("\\", "/")
+        immutable = rel.startswith(("/static/kuromoji/", "/static/fonts/"))
+        self._send_bytes(body, ctype,
+                         cache="public, max-age=31536000, immutable" if immutable else None)
 
     # -- routes ------------------------------------------------------------ #
     def do_GET(self):

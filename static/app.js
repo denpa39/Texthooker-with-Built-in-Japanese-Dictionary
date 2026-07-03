@@ -17,7 +17,16 @@ function setStatus(state, label) {
 }
 
 let tokenizer = null;
+// Hover-lookup cache, capped: an evening of reading used to grow this without
+// bound (each entry holds ~12 full dictionary entries). Map iterates in insertion
+// order, so evicting the first key is FIFO — good enough here.
+const LOOKUP_CACHE_MAX = 500;
 let lookupCache = new Map();
+function cacheLookup(key, val) {
+  if (lookupCache.size >= LOOKUP_CACHE_MAX)
+    lookupCache.delete(lookupCache.keys().next().value);
+  lookupCache.set(key, val);
+}
 
 /* ---- study preferences (persisted): Anki deck, hide-names, furigana mode -- */
 const STUDY_KEY = "vntex-study";
@@ -270,7 +279,7 @@ async function fetchScan(text, pos, reading, base, surface) {
                           "&base=" + encodeURIComponent(base || "") +
                           "&surface=" + encodeURIComponent(surface || ""));
     const res = (await r.json()).candidates || [];
-    lookupCache.set(key, res);
+    cacheLookup(key, res);
     return res;
   } catch (e) {
     return [];
