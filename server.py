@@ -174,7 +174,13 @@ def clean_hook_text(text):
 
 
 def clipboard_monitor(paused_flag):
-    last_seq = None
+    # Seed with the CURRENT sequence number: whatever already sits in the clipboard
+    # predates the app and must not be published (it used to appear — and get
+    # logged — on every launch).
+    try:
+        last_seq = user32.GetClipboardSequenceNumber() if sys.platform == "win32" else None
+    except Exception:
+        last_seq = None
     last_text = None
     while True:
         if not paused_flag.is_set():
@@ -299,7 +305,10 @@ def websocket_monitor(url, paused_flag):
                     text = _ws_extract_text(msg)
                     if text:
                         publish_line(text)
-        except OSError:
+        except Exception:
+            # Not just OSError: a truncated frame raises struct.error, a garbled
+            # one UnicodeDecodeError… anything here means "reconnect", never
+            # "kill the reader thread forever".
             pass
         if was_connected:
             print(f"WebSocket source lost: {url} (retrying)")
@@ -724,8 +733,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         if parsed.path == "/attach":
-            pid = self._read_json_body().get("pid")
-            err = hooker.attach(int(pid)) if pid else "no pid"
+            try:
+                pid = int(self._read_json_body().get("pid") or 0)
+            except (TypeError, ValueError):
+                pid = 0
+            err = hooker.attach(pid) if pid > 0 else "no pid"
             self._send_json({"error": err, **hooker.state()}, 400 if err else 200)
         elif parsed.path == "/detach":
             hooker.detach()
@@ -759,7 +771,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 exp_dir = os.path.join(BASE_DIR, "exports")
                 os.makedirs(exp_dir, exist_ok=True)
-                fname = "rabbit-hole-" + time.strftime("%Y-%m-%d-%H-%M") + ".txt"
+                fname = "rabbit-hole-" + time.strftime("%Y-%m-%d-%H-%M-%S") + ".txt"
                 path = os.path.join(exp_dir, fname)
                 with open(path, "w", encoding="utf-8") as f:
                     f.write("\n".join(str(l) for l in lines) + "\n")

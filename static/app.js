@@ -318,6 +318,7 @@ function renderSense(s, n) {
 /* ---- kanji info card (KANJIDIC2, /kanji route) --------------------------- */
 const kanjiCache = new Map();
 async function toggleKanjiCard(entryDiv, ch) {
+  if (entryDiv.dataset.kjBusy) return;   // a fetch is in flight — ignore rapid re-clicks
   const old = entryDiv.querySelector(".kanji-card");
   const sameChar = old && old.dataset.ch === ch;
   if (old) old.remove();
@@ -325,6 +326,7 @@ async function toggleKanjiCard(entryDiv, ch) {
   let info = kanjiCache.get(ch);
   let fetchFailed = false;
   if (info === undefined) {
+    entryDiv.dataset.kjBusy = "1";
     try {
       const r = await fetch("/kanji?c=" + encodeURIComponent(ch));
       if (!r.ok) throw new Error(String(r.status));   // 404 = server running old code
@@ -333,6 +335,8 @@ async function toggleKanjiCard(entryDiv, ch) {
     } catch (_) {
       info = null;
       fetchFailed = true;
+    } finally {
+      delete entryDiv.dataset.kjBusy;
     }
   }
   const card = document.createElement("div");
@@ -677,9 +681,11 @@ async function showScanPopup(target) {
   const seq = ++lookupSeq;
   const cands = await fetchScan(text, target.dataset.pos, target.dataset.jreading,
                                 target.dataset.term, target.dataset.surface);
-  // A newer peek superseded this one while the lookup was in flight — drop it so a
-  // slow response can't overwrite the word the user is now on. (Pins always render.)
-  if (!pinned && seq !== lookupSeq) return;
+  // A newer call superseded this one while the lookup was in flight — drop it.
+  // Guarding on seq alone (not `!pinned`) also stops a stale hover response from
+  // silently overwriting a popup the user just pinned; pin()'s own call is always
+  // the newest seq, so pins still render.
+  if (seq !== lookupSeq) return;
 
   const n = renderPopupBody(cands, {
     sentence: line.dataset.raw,
@@ -837,7 +843,12 @@ async function refreshProcesses() {
   procFetching = true;
   let j;
   try { j = await (await fetch("/processes")).json(); }
+  catch (_) { j = null; }
   finally { procFetching = false; }
+  if (!j) {   // server unreachable — leave the panel as-is, the 1s poll retries
+    hookMsg.textContent = "Can't reach the server — is it still running?";
+    return;
+  }
   procList.innerHTML = "";
   if (!j.available) {
     hookMsg.textContent = "Textractor isn't downloaded yet. Run:  python setup.py --textractor";
