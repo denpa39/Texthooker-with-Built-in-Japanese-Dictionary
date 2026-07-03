@@ -248,7 +248,8 @@ function addLine(text) {
     linesEl.scrollTo({ top: linesEl.scrollHeight, behavior: reduce ? "auto" : "smooth" });
   }
 
-  // keep DOM bounded
+  // Keep the DOM bounded. Known cosmetic quirk: a popup pinned to a word in the
+  // evicted line keeps showing until closed — harmless, not worth tracking.
   while (linesEl.children.length > 300) linesEl.removeChild(linesEl.firstChild);
 
   bumpStats(text);
