@@ -88,15 +88,30 @@ with `--freq`.
   高くなさそう, お読みになります — all reach their dictionary form.
 - **Pitch accent** on every entry that has one (Kanjium data): ⬇0 = flat, ⬇n = downstep
   after mora n.
+- **Kanji info cards (KANJIDIC2)** — in a pinned popup, click any kanji in the headword
+  for its meanings, on/kun readings, stroke count, school grade, JLPT level and
+  frequency rank.
+- **Hide names** — a popup toggle that filters JMnedict name clusters out of lookups
+  (they reappear with one click, and a pure-name token still shows its names).
+- **Manual lookup box** — type or paste any word in the toolbar and press Enter; no
+  hooking needed. Romaji works too (tabemasu → たべます).
 - **VN frequency chip** (№1,638) in the popup so you can tell at a glance whether a word
   is worth mining; green = common in visual novels.
 - **Anki export** — the ★ button on any entry adds a card (word, reading + pitch,
   meanings, source sentence) via [AnkiConnect](https://ankiweb.net/shared/info/2055492159).
-  Deck and note type are created automatically; just have Anki running.
+  Deck name is configurable (Theme → Study), the note type is created automatically,
+  a one-time "Anki ✓ / Anki –" toolbar indicator shows whether Anki is reachable, and
+  a duplicate card answers with "dup" instead of a generic error.
 - **Known-word tracking** — pin a word and mark it known; known words dim in the reader
-  so unknown vocabulary stands out. Stored in your browser.
+  so unknown vocabulary stands out. Import/export the list as a .txt (Theme → Study).
 - **Session persistence & export** — lines survive a page reload, and **Export** saves
   the session as a .txt. A live counter shows characters read and reading speed (字/時).
+  The server also appends every line to a per-day file in `logs/` (named after the
+  hooked game), so nothing is lost to a browser-storage wipe.
+- **WebSocket input** — reads text straight from Textractor's websocket plugin (:6677)
+  or Agent (:9001) with no clipboard round-trip; `--ws` configures or disables it.
+- **LAN mode** — `python server.py --lan` prints a LAN URL so you can read along on a
+  phone or tablet while the game runs on the PC (the layout adapts to small screens).
 - **Tokenizer-anchored ranking** so the intended word comes first. It trusts kuromoji's
   own analysis of each token — part-of-speech (は = particle, not 羽 "feather"), reading
   (本【ほん】"book", not 本【もと】"origin"), dictionary form (居る "to be", not 射る
@@ -121,8 +136,9 @@ with `--freq`.
 | Control | What it does |
 |---|---|
 | status dot | Connection state at a glance — green = ready, orange = paused, red = disconnected (hover for the label) |
+| lookup box | Type a word + Enter (romaji OK) — dictionary popup without hooking |
 | **Attach** | Hook a running game directly (embedded Textractor) — pick the process, then the text channel |
-| **Pause** / **Resume** | Stop/continue reading the clipboard |
+| **Pause** / **Resume** | Stop/continue capture (clipboard + websocket) |
 | **Furigana** | Show readings above kanji |
 | ▤ alignment icons | Text alignment — left, center, right, or justify |
 | **Theme** | Opens the Appearance panel (themes, colours, font, bold/italic, spacing) |
@@ -164,11 +180,21 @@ python setup.py --skip-kuromoji   # only rebuild the dictionary DB
 
 ```sh
 python server.py --port 7000     # use a different port
+python server.py --lan           # phone/tablet mode: listen on the network, print the LAN URL
+python server.py --ws ws://127.0.0.1:6677   # websocket text sources (default: Textractor :6677 + Agent :9001; '' disables)
 python server.py --browser       # open in the web browser instead of the app window
 python server.py --no-browser    # serve only; open nothing
 python setup.py --textractor     # (re)download only the embedded Textractor
 python setup.py --no-textractor  # skip Textractor during setup
 ```
+
+## Packaging (one-exe for non-Python users)
+
+`build_exe.bat` builds `DownTheRabbitHole.exe` + `RabbitHoleSetup.exe` with
+PyInstaller. Ship both in one folder: the user runs the setup exe once (it
+downloads the tokenizer, dictionaries and Textractor next to itself), then the
+app exe. The data stays outside the exe, so dictionary rebuilds don't mean
+re-downloading the app.
 
 ---
 
@@ -208,3 +234,4 @@ python setup.py --no-textractor  # skip Textractor during setup
   separate process).
 - Pitch accent: **Kanjium** — CC BY-SA 4.0.
 - VN frequency: **jiten.moe** — CC BY-SA 4.0.
+- Kanji info: **KANJIDIC2** (EDRDG licence).

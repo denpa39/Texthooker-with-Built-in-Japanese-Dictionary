@@ -12,7 +12,10 @@
   <span class="brand"><span class="brand-text">Down&nbsp;the&nbsp;Rabbit&nbsp;Hole</span></span>
   <span id="status" class="status connecting" role="status" title="Connecting…" aria-label="Connecting"></span>
   <span id="stats" class="stats" title="Characters read this session · reading speed"></span>
+  <span id="ankiInd" class="anki-ind"></span>
   <span class="spacer"></span>
+  <input id="lookupBox" type="search" lang="ja" placeholder="lookup…" aria-label="Manual dictionary lookup"
+         title="Type a word and press Enter to look it up — no hooking needed">
   <button id="attachBtn" title="Attach to a game — embedded Textractor, no clipboard needed">Attach</button>
   <button id="pauseBtn" title="Pause / resume clipboard capture">Pause</button>
   <button id="furiBtn" title="Toggle furigana readings">Furigana</button>
@@ -52,6 +55,16 @@
   <div class="style-toggles">
     <button id="boldToggle" class="style-toggle" title="Toggle bold reader text" aria-pressed="false"><b>B</b></button>
     <button id="italicToggle" class="style-toggle" title="Toggle italic reader text" aria-pressed="false"><i>I</i></button>
+  </div>
+  <div class="set-label">Study</div>
+  <label class="set-text">Anki deck
+    <input id="deckInput" type="text" spellcheck="false" aria-label="Anki deck name">
+  </label>
+  <div class="known-tools">
+    <span id="knownCount" class="known-count"></span>
+    <button id="knownExport" title="Download your known words as a .txt (one word per line)">Export</button>
+    <button id="knownImport" title="Import known words from a .txt (one word per line; merged)">Import</button>
+    <input id="knownFile" type="file" accept=".txt,.json" hidden>
   </div>
   <button id="setReset" class="set-reset">Reset to default</button>
 </aside>

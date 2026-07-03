@@ -7,43 +7,31 @@ Repo: Python stdlib server (`server.py`), setup/DB builder (`setup.py`), de-infl
 `python setup.py`). Tests: `test_ranking.py`, `python deinflect.py`. Verify UI with the
 preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 
-Ranked by value. Each notes rough scope + where it touches.
+## Remaining ideas
 
-## Dictionary / lookup
-1. **Kanji info (KANJIDIC2)** — new table in `setup.py` (readings, meanings, strokes,
-   JLPT, radical). Click a kanji in the popup header → mini kanji card. Big learner win,
-   medium effort. New `/kanji` route in `server.py`, render in `app.js`.
-2. **Example sentences (Tatoeba/Tanaka)** — one more table in `setup.py`, collapsed
-   section in the popup. Medium.
-3. **Pitch-accent graph** — draw the LH contour over the kana instead of the ⬇n number.
-   Data already stored (`c.pitch`); pure SVG/CSS in `app.js`/`style.css`. Small, high polish.
-4. **Word audio** — 🔊 button, Yomitan-style JapanesePod101 URL. Needs internet; optional.
-5. **Hide-names toggle** — popup filter button; name clusters can be noisy. Small.
+- **Word audio** — 🔊 button, Yomitan-style JapanesePod101 URL. Needs internet; optional.
+- **Known-words: "assume top-N frequency known" bulk-dim** — the one part of
+  known-words v2 not built (needs frequency data client-side, or a `/known-topn`
+  route server-side).
 
-## Study loop
-6. **Anki polish** — configurable deck name (settings), duplicate-detected feedback text,
-   optional audio field, one-time "Anki: connected ✓/not found" indicator in the toolbar.
-   Core export already verified working. Small.
-7. **Known-words v2** — import/export the list, "assume top-N frequency known" bulk-dim,
-   per-line coverage % ("you know 87% of this line"), option to show furigana only on
-   unknown words. Builds on existing `knownWords` Set in `app.js`. Medium.
-8. **Manual lookup box** — type/paste a word to search without hooking it. Trivial: reuse
-   the `/scan` route + `fetchScan`.
+## Done (2026-07-02 sweep, trimmed 07-03 per user feedback)
 
-## Infra / UX
-9. **WebSocket text input** — accept Textractor/LunaTranslator/Agent websocket directly
-   (convention: ws on 6677/9001) instead of only clipboard. No clipboard race, works when
-   another app owns the clipboard, cross-platform. New thread in `server.py`. Medium-large.
-10. **Server-side session log** — append each line to a per-day `.txt` on disk (named per
-    game). Survives browser-storage wipe and the 300-line DOM cap. Small, in `server.py`.
-11. **LAN mode** — `--host 0.0.0.0` + phone/tablet-friendly layout so you can read on a
-    second device while the game runs on PC. Small server flag + responsive CSS pass.
-12. **Packaging** — PyInstaller one-exe for non-Python users. `setup.bat` is half-way.
+Kanji info cards (KANJIDIC2, `/kanji`), hide-names popup toggle, Anki polish
+(configurable deck + toolbar indicator + dup feedback), known-words
+import/export, manual lookup box (romaji accepted), websocket input
+(Textractor :6677 / Agent :9001, `--ws`), server-side session log (`logs/`),
+LAN mode (`--lan` + responsive pass), PyInstaller packaging (`build_exe.bat`),
+run.bat closes its window on clean quit.
 
-## Cheapest high-value first: 8, 3, 5.  Biggest wins: 1, 9, 7.
+Built then REMOVED on user request (don't re-add without asking): Tanaka example
+sentences, pitch-accent LH contour graph (back to ⬇n), per-line coverage %,
+furigana-on-unknown-only (back to plain on/off).
 
-## Known loose ends (from the last session)
+## Known loose ends
+
 - Yomitan rule table is **GPL-3.0** (`deinflect_data.py`) — if the repo is published,
   it must carry a GPL-compatible licence. Noted in README "Data & licences".
 - One test Anki card (食べる) may still be in the user's Anki deck "Down the Rabbit Hole".
 - `dict.sqlite` not committed by design; fresh clones run `python setup.py`.
+- New setup steps [5/8] kanji and [6/8] examples add tables to an existing
+  `dict.sqlite` on the next `python setup.py` run (no `--force` needed).

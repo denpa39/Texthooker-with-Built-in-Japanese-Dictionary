@@ -15,6 +15,11 @@ Run after `python setup.py`:   python test_ranking.py
 import os
 import sys
 
+try:
+    sys.stdout.reconfigure(errors="replace")   # cp932 consoles can't print '›'
+except Exception:
+    pass
+
 import server
 
 # (label, text, pos, reading, base, surface, want_kind, want_substr)

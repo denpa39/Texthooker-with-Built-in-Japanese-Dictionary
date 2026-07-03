@@ -12,3 +12,10 @@ __pycache__/
 # Local machine-specific editor/agent settings
 .claude/settings.local.json
 textractor/
+
+# Session logs + exports written by the server, and PyInstaller build output
+logs/
+exports/
+build/
+dist/
+*.spec

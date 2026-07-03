@@ -17,8 +17,18 @@ function setStatus(state, label) {
 }
 
 let tokenizer = null;
-let showFurigana = false;
 let lookupCache = new Map();
+
+/* ---- study preferences (persisted): Anki deck, hide-names, furigana mode -- */
+const STUDY_KEY = "vntex-study";
+const STUDY_DEFAULTS = { deck: "Down the Rabbit Hole", hideNames: false, furi: "off" };
+let study;
+try { study = Object.assign({}, STUDY_DEFAULTS, JSON.parse(localStorage.getItem(STUDY_KEY)) || {}); }
+catch (_) { study = Object.assign({}, STUDY_DEFAULTS); }
+study.furi = (study.furi === "all" || study.furi === "unknown") ? "all" : "off";
+function saveStudy() {
+  try { localStorage.setItem(STUDY_KEY, JSON.stringify(study)); } catch (_) {}
+}
 
 /* ---- known-word tracking (persisted) ----------------------------------- */
 const KNOWN_KEY = "vntex-known";
@@ -27,12 +37,17 @@ try { knownWords = new Set(JSON.parse(localStorage.getItem(KNOWN_KEY)) || []); }
 catch (_) { knownWords = new Set(); }
 function saveKnown() {
   try { localStorage.setItem(KNOWN_KEY, JSON.stringify([...knownWords])); } catch (_) {}
+  updateKnownCount();
 }
 function refreshKnown(term) {
   document.querySelectorAll(".token.word").forEach(sp => {
     if (!term || sp.dataset.term === term)
       sp.classList.toggle("known", knownWords.has(sp.dataset.term));
   });
+}
+function updateKnownCount() {
+  const el = document.getElementById("knownCount");
+  if (el) el.textContent = knownWords.size.toLocaleString() + " known words";
 }
 
 /* ---- session persistence + reading stats ------------------------------- */
@@ -109,6 +124,48 @@ function toHiragana(s) {
 const hasKanji = s => /[一-龯々]/.test(s);
 const isJapanese = s => /[぀-ヿ一-龯々ｦ-ﾟ]/.test(s);
 
+/* ---- romaji -> hiragana (for the manual lookup box) --------------------- */
+const ROMAJI = {
+  // digraphs first (longest-match wins)
+  kya:"きゃ",kyu:"きゅ",kyo:"きょ",gya:"ぎゃ",gyu:"ぎゅ",gyo:"ぎょ",
+  sha:"しゃ",shu:"しゅ",sho:"しょ",sya:"しゃ",syu:"しゅ",syo:"しょ",
+  cha:"ちゃ",chu:"ちゅ",cho:"ちょ",tya:"ちゃ",tyu:"ちゅ",tyo:"ちょ",
+  ja:"じゃ",ju:"じゅ",jo:"じょ",jya:"じゃ",jyu:"じゅ",jyo:"じょ",
+  nya:"にゃ",nyu:"にゅ",nyo:"にょ",hya:"ひゃ",hyu:"ひゅ",hyo:"ひょ",
+  bya:"びゃ",byu:"びゅ",byo:"びょ",pya:"ぴゃ",pyu:"ぴゅ",pyo:"ぴょ",
+  mya:"みゃ",myu:"みゅ",myo:"みょ",rya:"りゃ",ryu:"りゅ",ryo:"りょ",
+  shi:"し",chi:"ち",tsu:"つ",
+  ka:"か",ki:"き",ku:"く",ke:"け",ko:"こ",ga:"が",gi:"ぎ",gu:"ぐ",ge:"げ",go:"ご",
+  sa:"さ",si:"し",su:"す",se:"せ",so:"そ",za:"ざ",zi:"じ",zu:"ず",ze:"ぜ",zo:"ぞ",
+  ta:"た",ti:"ち",tu:"つ",te:"て",to:"と",da:"だ",de:"で",do:"ど",ji:"じ",
+  na:"な",ni:"に",nu:"ぬ",ne:"ね",no:"の",
+  ha:"は",hi:"ひ",hu:"ふ",fu:"ふ",he:"へ",ho:"ほ",
+  ba:"ば",bi:"び",bu:"ぶ",be:"べ",bo:"ぼ",pa:"ぱ",pi:"ぴ",pu:"ぷ",pe:"ぺ",po:"ぽ",
+  ma:"ま",mi:"み",mu:"む",me:"め",mo:"も",ya:"や",yu:"ゆ",yo:"よ",
+  ra:"ら",ri:"り",ru:"る",re:"れ",ro:"ろ",wa:"わ",wo:"を",vu:"ゔ",
+  a:"あ",i:"い",u:"う",e:"え",o:"お",n:"ん","-":"ー","'":"",
+};
+function romajiToKana(s) {
+  s = s.toLowerCase();
+  let out = "", i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    // sokuon: doubled consonant (kk, tt, pp…) or the t in "tch" (matcha)
+    if (c === s[i + 1] && "bcdfghjklmpqrstvwz".includes(c)) { out += "っ"; i++; continue; }
+    if (c === "t" && s.slice(i + 1, i + 3) === "ch") { out += "っ"; i++; continue; }
+    let matched = false;
+    for (const len of [3, 2, 1]) {
+      const chunk = s.slice(i, i + len);
+      // bare "n" only when NOT starting a syllable (na/ni/nya… match longer first,
+      // but "n" before a vowel/y must not swallow the syllable's consonant)
+      if (chunk === "n" && i + 1 < s.length && "aiueoy".includes(s[i + 1])) continue;
+      if (ROMAJI[chunk] !== undefined) { out += ROMAJI[chunk]; i += len; matched = true; break; }
+    }
+    if (!matched) { out += c; i++; }   // pass anything unconvertible through
+  }
+  return out;
+}
+
 /* ---- tokenizer init ---------------------------------------------------- */
 kuromoji.builder({ dicPath: "/static/kuromoji/dict" }).build((err, tk) => {
   if (err) {
@@ -159,7 +216,7 @@ function buildSentence(text) {
       span.dataset.off = String((t.word_position || 1) - 1);  // start index in the line
       if (knownWords.has(base)) span.classList.add("known");
 
-      if (showFurigana && hasKanji(surface) && t.reading && t.reading !== "*") {
+      if (study.furi !== "off" && hasKanji(surface) && t.reading && t.reading !== "*") {
         const ruby = document.createElement("ruby");
         ruby.textContent = surface;
         const rt = document.createElement("rt");
@@ -270,10 +327,79 @@ function renderSense(s, n) {
   return sense;
 }
 
+/* ---- kanji info card (KANJIDIC2, /kanji route) --------------------------- */
+const kanjiCache = new Map();
+async function toggleKanjiCard(entryDiv, ch) {
+  const old = entryDiv.querySelector(".kanji-card");
+  const sameChar = old && old.dataset.ch === ch;
+  if (old) old.remove();
+  if (sameChar) return;                       // second click on the same kanji closes it
+  let info = kanjiCache.get(ch);
+  let fetchFailed = false;
+  if (info === undefined) {
+    try {
+      const r = await fetch("/kanji?c=" + encodeURIComponent(ch));
+      if (!r.ok) throw new Error(String(r.status));   // 404 = server running old code
+      info = (await r.json()).info;
+      kanjiCache.set(ch, info);                       // only cache real answers
+    } catch (_) {
+      info = null;
+      fetchFailed = true;
+    }
+  }
+  const card = document.createElement("div");
+  card.className = "kanji-card";
+  card.dataset.ch = ch;
+  if (!info) {
+    card.textContent = fetchFailed
+      ? "kanji lookup failed — quit every app window/terminal and start it again "
+        + "(an old server instance may still be running)"
+      : "no kanji data — run `python setup.py` to add KANJIDIC2";
+  } else {
+    const big = document.createElement("span");
+    big.className = "kj-big";
+    big.textContent = ch;
+    const body = document.createElement("div");
+    body.className = "kj-body";
+    const mean = document.createElement("div");
+    mean.className = "kj-mean";
+    mean.textContent = (info.meanings || []).join(", ");
+    body.appendChild(mean);
+    const addReadings = (label, list) => {
+      if (!list || !list.length) return;
+      const d = document.createElement("div");
+      d.className = "kj-read";
+      const b = document.createElement("b");
+      b.textContent = label + " ";
+      d.append(b, document.createTextNode(list.join("、")));
+      body.appendChild(d);
+    };
+    addReadings("音", info.on);
+    addReadings("訓", info.kun);
+    const chips = document.createElement("div");
+    chips.className = "kj-chips";
+    const chip = (txt, title) => {
+      const s = document.createElement("span");
+      s.textContent = txt;
+      if (title) s.title = title;
+      chips.appendChild(s);
+    };
+    if (info.strokes) chip(info.strokes + " strokes");
+    if (info.grade) chip("grade " + info.grade, "school grade in which the kanji is taught");
+    if (info.jlpt) chip("JLPT " + info.jlpt, "old 4-level JLPT scale (1 = hardest)");
+    if (info.freq) chip("№" + info.freq.toLocaleString(), "newspaper frequency rank");
+    body.appendChild(chips);
+    card.append(big, body);
+  }
+  entryDiv.querySelector(".head").after(card);
+}
+
 /* ---- Anki export (via the server's /anki proxy to AnkiConnect) ---------- */
-const ANKI_DECK = "Down the Rabbit Hole";
 const ANKI_MODEL = "Down the Rabbit Hole";
-let ankiReady = false;
+const ankiDecksReady = new Set();
+let ankiModelReady = false;
+
+function ankiDeck() { return (study.deck || "").trim() || STUDY_DEFAULTS.deck; }
 
 async function anki(action, params) {
   const r = await fetch("/anki", {
@@ -287,22 +413,43 @@ async function anki(action, params) {
 
 // Create our deck + note type once, so export works with zero Anki-side setup.
 async function ensureAnki() {
-  if (ankiReady) return;
-  const models = await anki("modelNames");
-  if (!models.includes(ANKI_MODEL)) {
-    await anki("createModel", {
-      modelName: ANKI_MODEL,
-      inOrderFields: ["Word", "Reading", "Meaning", "Sentence"],
-      cardTemplates: [{
-        Name: "Card 1",
-        Front: '<div style="font-size:40px">{{Word}}</div><div>{{Sentence}}</div>',
-        Back: '<div style="font-size:40px">{{Word}}</div>{{Reading}}<hr>{{Meaning}}<hr>{{Sentence}}',
-      }],
-    });
+  if (!ankiModelReady) {
+    const models = await anki("modelNames");
+    if (!models.includes(ANKI_MODEL)) {
+      await anki("createModel", {
+        modelName: ANKI_MODEL,
+        inOrderFields: ["Word", "Reading", "Meaning", "Sentence"],
+        cardTemplates: [{
+          Name: "Card 1",
+          Front: '<div style="font-size:40px">{{Word}}</div><div>{{Sentence}}</div>',
+          Back: '<div style="font-size:40px">{{Word}}</div>{{Reading}}<hr>{{Meaning}}<hr>{{Sentence}}',
+        }],
+      });
+    }
+    ankiModelReady = true;
   }
-  await anki("createDeck", { deck: ANKI_DECK });   // no-op if it exists
-  ankiReady = true;
+  const deck = ankiDeck();
+  if (!ankiDecksReady.has(deck)) {
+    await anki("createDeck", { deck });   // no-op if it exists
+    ankiDecksReady.add(deck);
+  }
 }
+
+// One-time toolbar indicator: is Anki (with AnkiConnect) reachable right now?
+(async () => {
+  const el = document.getElementById("ankiInd");
+  if (!el) return;
+  try {
+    const v = await anki("version");
+    el.textContent = "Anki ✓";
+    el.classList.add("ok");
+    el.title = "AnkiConnect connected (v" + v + ") — ★ in the popup adds a card";
+  } catch (_) {
+    el.textContent = "Anki –";
+    el.title = "Anki not found — start Anki with the AnkiConnect add-on to export cards";
+  }
+  setTimeout(() => el.classList.add("fade"), 8000);
+})();
 
 async function addToAnki(c, sentence, btn) {
   const entry = c.entry;
@@ -315,7 +462,7 @@ async function addToAnki(c, sentence, btn) {
     await ensureAnki();
     await anki("addNote", {
       note: {
-        deckName: ANKI_DECK, modelName: ANKI_MODEL,
+        deckName: ankiDeck(), modelName: ANKI_MODEL,
         fields: { Word: word, Reading: reading, Meaning: meaning, Sentence: sentence || "" },
         options: { allowDuplicate: false },
       },
@@ -323,8 +470,13 @@ async function addToAnki(c, sentence, btn) {
     btn.textContent = "✓";
     btn.title = "added to Anki";
   } catch (e) {
-    btn.textContent = "✗";
-    btn.title = "Anki: " + e.message;   // hover the button to see why
+    if (/duplicate/i.test(e.message)) {
+      btn.textContent = "dup";
+      btn.title = "already in your Anki collection";
+    } else {
+      btn.textContent = "✗";
+      btn.title = "Anki: " + e.message;   // hover the button to see why
+    }
   }
   setTimeout(() => { btn.textContent = "★"; btn.title = "add to Anki"; }, 1800);
 }
@@ -355,7 +507,22 @@ function renderCandidate(c, sentence) {
                         : ((entry.k && entry.k[0]) || (entry.r && entry.r[0]) || c.matched);
   const hw = document.createElement("span");
   hw.className = "hw";
-  hw.textContent = primary;
+  // each kanji in the headword is clickable -> KANJIDIC2 mini card (pin to click)
+  for (const ch of primary) {
+    if (/[一-龯々]/.test(ch)) {
+      const k = document.createElement("span");
+      k.className = "kj";
+      k.textContent = ch;
+      k.title = "kanji info";
+      k.addEventListener("click", ev => {
+        ev.stopPropagation();
+        toggleKanjiCard(div, ch);
+      });
+      hw.appendChild(k);
+    } else {
+      hw.appendChild(document.createTextNode(ch));
+    }
+  }
   head.appendChild(hw);
   const readingShown = c.mr || (entry.r && entry.r[0]);
   if (!allUk && hasKanji && readingShown) {
@@ -458,19 +625,10 @@ function renderCandidate(c, sentence) {
   return div;
 }
 
-let lookupSeq = 0;
-async function showScanPopup(target) {
-  const line = target.closest(".line");
-  if (!line) return;
-  const off = parseInt(target.dataset.off || "0", 10);
-  const text = line.dataset.raw.slice(off);
-  const seq = ++lookupSeq;
-  const cands = await fetchScan(text, target.dataset.pos, target.dataset.jreading,
-                                target.dataset.term, target.dataset.surface);
-  // A newer peek superseded this one while the lookup was in flight — drop it so a
-  // slow response can't overwrite the word the user is now on. (Pins always render.)
-  if (!pinned && seq !== lookupSeq) return;
-
+// Shared popup body used by the hover/pin path and the manual lookup box.
+// opts: {sentence, emptyLabel, knownTerm, rerender} — rerender is called when the
+// hide-names toggle flips, so the same lookup re-renders with the new filter.
+function renderPopupBody(cands, opts) {
   popup.innerHTML = "";
   if (pinned) {
     const close = document.createElement("button");
@@ -481,17 +639,39 @@ async function showScanPopup(target) {
     close.addEventListener("click", unpin);
     popup.appendChild(close);
   }
-  if (!cands.length) {
+
+  // Hide-names filter: name clusters can be noisy. Only filter when a real word
+  // remains — a pure-name token still shows its names.
+  const nameCount = cands.filter(c => c.kind === "name").length;
+  const filterable = nameCount > 0 && nameCount < cands.length;
+  const shown = (study.hideNames && filterable)
+    ? cands.filter(c => c.kind !== "name") : cands;
+
+  if (!shown.length) {
     const e = document.createElement("div");
     e.className = "empty";
-    e.textContent = `No entry for 「${target.dataset.surface || target.dataset.term}」`;
+    e.textContent = `No entry for 「${opts.emptyLabel}」`;
     popup.appendChild(e);
   } else {
-    cands.forEach(c => popup.appendChild(renderCandidate(c, line.dataset.raw)));
+    shown.forEach(c => popup.appendChild(renderCandidate(c, opts.sentence)));
   }
-  // Pinned popup: mark the hovered word known/unknown (known words dim in the reader).
-  if (pinned) {
-    const term = target.dataset.term;
+  if (filterable) {
+    const nt = document.createElement("div");
+    nt.className = "name-toggle";
+    nt.textContent = study.hideNames
+      ? `${nameCount} name${nameCount > 1 ? "s" : ""} hidden — show`
+      : "hide names";
+    nt.addEventListener("click", ev => {
+      ev.stopPropagation();
+      study.hideNames = !study.hideNames;
+      saveStudy();
+      opts.rerender();
+    });
+    popup.appendChild(nt);
+  }
+  // Pinned popup: mark the word known/unknown (known words dim in the reader).
+  if (pinned && opts.knownTerm) {
+    const term = opts.knownTerm;
     const kb = document.createElement("button");
     kb.className = "known-btn" + (knownWords.has(term) ? " on" : "");
     kb.textContent = knownWords.has(term) ? "✓ known — click to unmark" : "mark 「" + term + "」 as known";
@@ -506,20 +686,46 @@ async function showScanPopup(target) {
     });
     popup.appendChild(kb);
   }
+  return shown.length;
+}
+
+function finishPopup(anchor, showFoot) {
   // Peek footer: teach the two least-discoverable features (and signal scrollability).
   let foot = null;
-  if (!pinned && cands.length) {
+  if (showFoot) {
     foot = document.createElement("div");
     foot.className = "popup-foot";
     popup.appendChild(foot);
   }
   popup.scrollTop = 0;   // new word -> start at the top, don't inherit the last scroll
-  positionPopup(target);
+  positionPopup(anchor);
   if (foot) {
     const more = popup.scrollHeight > popup.clientHeight + 1;
     foot.textContent = more ? "click to pin · scroll for more ↓" : "click to pin";
   }
   popup.classList.remove("hidden");
+}
+
+let lookupSeq = 0;
+async function showScanPopup(target) {
+  const line = target.closest(".line");
+  if (!line) return;
+  const off = parseInt(target.dataset.off || "0", 10);
+  const text = line.dataset.raw.slice(off);
+  const seq = ++lookupSeq;
+  const cands = await fetchScan(text, target.dataset.pos, target.dataset.jreading,
+                                target.dataset.term, target.dataset.surface);
+  // A newer peek superseded this one while the lookup was in flight — drop it so a
+  // slow response can't overwrite the word the user is now on. (Pins always render.)
+  if (!pinned && seq !== lookupSeq) return;
+
+  const n = renderPopupBody(cands, {
+    sentence: line.dataset.raw,
+    emptyLabel: target.dataset.surface || target.dataset.term,
+    knownTerm: target.dataset.term,
+    rerender: () => showScanPopup(target),
+  });
+  finishPopup(target, !pinned && n > 0);
 }
 
 function positionPopup(target) {
@@ -763,9 +969,43 @@ refreshPause();
 
 const furiBtn = document.getElementById("furiBtn");
 furiBtn.addEventListener("click", () => {
-  showFurigana = !showFurigana;
-  furiBtn.classList.toggle("active", showFurigana);
+  study.furi = study.furi === "off" ? "all" : "off";
+  saveStudy();
+  furiBtn.classList.toggle("active", study.furi !== "off");
   rebuildSentences();
+});
+furiBtn.classList.toggle("active", study.furi !== "off");
+if (study.furi !== "off") rebuildSentences();
+
+// Manual lookup box: type/paste a word (romaji works too — romajiToKana above),
+// Enter -> pinned popup.
+const lookupBox = document.getElementById("lookupBox");
+lookupBox.addEventListener("keydown", async e => {
+  if (e.key !== "Enter") return;
+  let text = lookupBox.value.trim();
+  if (!text) return;
+  if (/^[a-zA-Z'-]+$/.test(text)) text = romajiToKana(text);
+  // borrow the tokenizer's analysis of the first token for better ranking
+  let pos = "", reading = "", base = "", surface = "";
+  if (tokenizer) {
+    const t = tokenizer.tokenize(text)[0];
+    if (t) {
+      pos = t.pos || "";
+      reading = (t.reading && t.reading !== "*") ? t.reading : "";
+      base = (t.basic_form && t.basic_form !== "*") ? t.basic_form : "";
+      surface = t.surface_form;
+    }
+  }
+  const cands = await fetchScan(text, pos, reading, base, surface);
+  pinned = true;
+  popup.classList.add("pinned");
+  activeWord = null;
+  const rerender = () => {
+    renderPopupBody(cands, { sentence: text, emptyLabel: text,
+                             knownTerm: base || text, rerender });
+    finishPopup(lookupBox, false);
+  };
+  rerender();
 });
 
 // Remove only the most recent line (undo), and move the "latest" highlight back.
@@ -808,18 +1048,64 @@ clearAllBtn.addEventListener("click", () => {
   saveSession();
 });
 
-// Export the session as a plain-text file, one line per hooked line.
-document.getElementById("exportBtn").addEventListener("click", () => {
+// Export the session: the server writes exports/rabbit-hole-….txt and reveals it
+// in Explorer. (A blob-download <a> doesn't work inside the app window — WebView2
+// silently drops it — so the server does the saving for both window and browser.)
+const exportBtn = document.getElementById("exportBtn");
+exportBtn.addEventListener("click", async () => {
   const lines = savedLines();
   if (!lines.length) return;
-  const stamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, "-");
-  const blob = new Blob([lines.join("\n") + "\n"], { type: "text/plain;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "rabbit-hole-" + stamp + ".txt";
-  a.click();
-  URL.revokeObjectURL(a.href);
+  try {
+    const j = await jpost("/export", { lines });
+    if (j.error) throw new Error(j.error);
+    exportBtn.textContent = "Saved ✓";
+    exportBtn.title = "saved to " + j.path;
+  } catch (e) {
+    exportBtn.textContent = "Export ✗";
+    exportBtn.title = "export failed: " + e.message;
+  }
+  setTimeout(() => { exportBtn.textContent = "Export"; }, 2000);
 });
 
-// Appearance (theme / colours / font / text size) lives in settings.js, which
-// also wires up the toolbar's #fontRange size slider.
+/* ---- Study section of the settings panel (Anki deck, known-words tools) -- */
+(function initStudyPanel() {
+  const deckInput = document.getElementById("deckInput");
+  deckInput.value = study.deck;
+  deckInput.placeholder = STUDY_DEFAULTS.deck;
+  deckInput.addEventListener("change", () => {
+    study.deck = deckInput.value.trim() || STUDY_DEFAULTS.deck;
+    deckInput.value = study.deck;
+    saveStudy();
+  });
+
+  document.getElementById("knownExport").addEventListener("click", () => {
+    const blob = new Blob([[...knownWords].join("\n") + "\n"],
+                          { type: "text/plain;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "known-words.txt";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  const knownFile = document.getElementById("knownFile");
+  document.getElementById("knownImport").addEventListener("click", () => knownFile.click());
+  knownFile.addEventListener("change", async () => {
+    const file = knownFile.files[0];
+    if (!file) return;
+    const text = await file.text();
+    let words;
+    try { words = JSON.parse(text); }                       // our export, or a JSON array
+    catch (_) { words = text.split(/\r?\n/); }              // plain one-word-per-line
+    if (!Array.isArray(words)) words = [];
+    const before = knownWords.size;
+    words.map(w => String(w).trim()).filter(Boolean).forEach(w => knownWords.add(w));
+    saveKnown();
+    refreshKnown();
+    const el = document.getElementById("knownCount");
+    if (el) el.textContent = `+${knownWords.size - before} imported · ${knownWords.size.toLocaleString()} known words`;
+    knownFile.value = "";
+  });
+
+  updateKnownCount();
+})();

@@ -12,12 +12,15 @@ Usage:
 """
 
 import argparse
+import base64
 import ctypes
 import functools
 import json
 import os
 import queue
+import socket
 import sqlite3
+import struct
 import sys
 import threading
 import time
@@ -30,9 +33,13 @@ from urllib.parse import urlparse, parse_qs
 import deinflect
 import hook
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Frozen (PyInstaller) builds live next to their data: static/, dict.sqlite and
+# textractor/ sit beside the .exe, not inside the unpacked bundle.
+BASE_DIR = (os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, "frozen", False)
+            else os.path.dirname(os.path.abspath(__file__)))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 DB_PATH = os.path.join(BASE_DIR, "dict.sqlite")
+LOG_DIR = os.path.join(BASE_DIR, "logs")
 
 # --------------------------------------------------------------------------- #
 # Windows clipboard reader (ctypes, no dependencies)
@@ -120,13 +127,30 @@ broadcaster = Broadcaster()
 _last_published = [None]
 
 
+def _log_line(text):
+    """Append every published line to a per-day file on disk (named after the
+    attached game when hooking). Survives a browser-storage wipe and the reader's
+    300-line DOM cap."""
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        game = os.path.splitext(hooker.exe)[0] if hooker.exe else ""
+        game = "".join(ch for ch in game if ch not in '\\/:*?"<>|').strip()
+        fname = time.strftime("%Y-%m-%d") + (f" - {game}" if game else "") + ".txt"
+        with open(os.path.join(LOG_DIR, fname), "a", encoding="utf-8") as f:
+            f.write(text + "\n")
+    except OSError:
+        pass
+
+
 def publish_line(text):
-    """Single entry point for both text sources (clipboard + embedded Textractor):
-    clean the classic hook artifacts, drop consecutive repeats, broadcast."""
+    """Single entry point for all text sources (clipboard + embedded Textractor +
+    websocket): clean the classic hook artifacts, drop consecutive repeats,
+    log to disk, broadcast."""
     text = clean_hook_text((text or "").strip())
     if not text or text == _last_published[0]:
         return
     _last_published[0] = text
+    _log_line(text)
     broadcaster.publish(text)
 
 
@@ -168,6 +192,119 @@ def clipboard_monitor(paused_flag):
 
 
 PAUSED = threading.Event()  # set => clipboard monitoring paused
+
+
+# --------------------------------------------------------------------------- #
+# WebSocket text input (Textractor's websocket plugin :6677, Agent :9001,
+# LunaTranslator…). Those tools run a tiny WS *server*; we connect out to it as
+# a client — no clipboard race, works when another app owns the clipboard.
+# Minimal RFC 6455 client, stdlib only.
+# --------------------------------------------------------------------------- #
+def _ws_send(sock, opcode, payload=b""):
+    """One masked client frame (clients MUST mask, RFC 6455 §5.3)."""
+    mask = os.urandom(4)
+    n = len(payload)
+    if n < 126:
+        header = bytes([0x80 | opcode, 0x80 | n])
+    elif n < 65536:
+        header = bytes([0x80 | opcode, 0x80 | 126]) + struct.pack(">H", n)
+    else:
+        header = bytes([0x80 | opcode, 0x80 | 127]) + struct.pack(">Q", n)
+    sock.sendall(header + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+
+
+def _ws_messages(url):
+    """Connect to a websocket URL, yield each complete text message. Raises on
+    any connection problem — the caller reconnects."""
+    u = urlparse(url)
+    sock = socket.create_connection((u.hostname, u.port or 80), timeout=4)
+    try:
+        sock.settimeout(45)
+        f = sock.makefile("rb")
+        key = base64.b64encode(os.urandom(16)).decode()
+        sock.sendall((
+            f"GET {u.path or '/'} HTTP/1.1\r\n"
+            f"Host: {u.hostname}:{u.port or 80}\r\n"
+            "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        ).encode())
+        status = f.readline()
+        if b"101" not in status:
+            raise OSError("websocket handshake refused")
+        while f.readline() not in (b"\r\n", b""):
+            pass
+        msg = b""
+        while True:
+            try:
+                hdr = f.read(2)
+            except socket.timeout:
+                _ws_send(sock, 0x9)          # idle: ping to probe the connection
+                continue
+            if len(hdr) < 2:
+                return
+            fin, opcode = hdr[0] & 0x80, hdr[0] & 0x0F
+            ln = hdr[1] & 0x7F
+            if ln == 126:
+                ln = struct.unpack(">H", f.read(2))[0]
+            elif ln == 127:
+                ln = struct.unpack(">Q", f.read(8))[0]
+            if hdr[1] & 0x80:                # masked server frame (non-standard)
+                mask = f.read(4)
+                payload = bytes(b ^ mask[i % 4] for i, b in enumerate(f.read(ln)))
+            else:
+                payload = f.read(ln)
+            if opcode == 0x8:                # close
+                return
+            if opcode == 0x9:                # ping -> pong
+                _ws_send(sock, 0xA, payload)
+                continue
+            if opcode in (0x0, 0x1):
+                msg += payload
+                if fin:
+                    yield msg.decode("utf-8", "replace")
+                    msg = b""
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
+def _ws_extract_text(msg):
+    """Sources send plain text or a small JSON envelope; pull the sentence out."""
+    msg = (msg or "").strip()
+    if msg.startswith("{"):
+        try:
+            j = json.loads(msg)
+            for k in ("sentence", "text", "data", "message"):
+                if isinstance(j.get(k), str):
+                    return j[k]
+            return ""
+        except ValueError:
+            pass
+    return msg
+
+
+def websocket_monitor(url, paused_flag):
+    """One reconnect-forever reader per websocket source. Quiet when the source
+    isn't running; announces connects/drops so the user can tell it's live."""
+    was_connected = False
+    while True:
+        try:
+            for msg in _ws_messages(url):
+                if not was_connected:
+                    was_connected = True
+                    print(f"WebSocket source connected: {url}")
+                if not paused_flag.is_set():
+                    text = _ws_extract_text(msg)
+                    if text:
+                        publish_line(text)
+        except OSError:
+            pass
+        if was_connected:
+            print(f"WebSocket source lost: {url} (retrying)")
+            was_connected = False
+        time.sleep(5)
 
 
 # --------------------------------------------------------------------------- #
@@ -499,6 +636,18 @@ def scan(text, pos=None, reading=None, base=None, surface=None):
     return cands
 
 
+def kanji_info(ch):
+    """KANJIDIC2 card for one kanji (None without the table / unknown char)."""
+    if not ch:
+        return None
+    db = get_db()
+    try:
+        row = db.execute("SELECT json FROM kanji WHERE literal = ?", (ch[0],)).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    return json.loads(row[0]) if row else None
+
+
 # --------------------------------------------------------------------------- #
 # HTTP handler
 # --------------------------------------------------------------------------- #
@@ -523,6 +672,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        # Always revalidate: the app window (WebView2) otherwise happily serves a
+        # stale app.js/index.html after an update — "new feature isn't working".
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)
 
@@ -572,6 +724,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"candidates": scan(text, pos, reading, base, surface)})
             except Exception as e:
                 self._send_json({"candidates": [], "error": str(e)}, 500)
+        elif path == "/kanji":
+            qs = parse_qs(parsed.query)
+            ch = (qs.get("c") or [""])[0]
+            self._send_json({"kanji": ch[:1], "info": kanji_info(ch)})
         elif path == "/state":
             self._send_json({"paused": PAUSED.is_set()})
         elif path == "/processes":
@@ -622,6 +778,26 @@ class Handler(BaseHTTPRequestHandler):
                     {"result": None,
                      "error": "AnkiConnect unreachable — is Anki running with the AnkiConnect add-on?"},
                     502)
+        elif parsed.path == "/export":
+            # The app window (WebView2) swallows blob downloads, so the page posts
+            # its lines here; we save to exports/ and reveal the file in Explorer.
+            lines = self._read_json_body().get("lines") or []
+            if not lines:
+                self._send_json({"error": "nothing to export"}, 400)
+                return
+            try:
+                exp_dir = os.path.join(BASE_DIR, "exports")
+                os.makedirs(exp_dir, exist_ok=True)
+                fname = "rabbit-hole-" + time.strftime("%Y-%m-%d-%H-%M") + ".txt"
+                path = os.path.join(exp_dir, fname)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write("\n".join(str(l) for l in lines) + "\n")
+                if sys.platform == "win32":
+                    import subprocess
+                    subprocess.Popen(["explorer", "/select,", path])
+                self._send_json({"path": path})
+            except OSError as e:
+                self._send_json({"error": str(e)}, 500)
         elif parsed.path == "/pause":
             length = int(self.headers.get("Content-Length", 0))
             raw = self.rfile.read(length) if length else b"{}"
@@ -677,11 +853,21 @@ def main():
     ap = argparse.ArgumentParser(description="Down the Rabbit Hole - VN texthooker server")
     ap.add_argument("--port", type=int, default=3939)
     ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--lan", action="store_true",
+                    help="listen on all interfaces so a phone/tablet on the same "
+                         "Wi-Fi can read along")
+    ap.add_argument("--ws", default="ws://127.0.0.1:6677,ws://127.0.0.1:9001",
+                    metavar="URLS",
+                    help="comma-separated websocket text sources to read from "
+                         "(Textractor websocket plugin :6677, Agent :9001; "
+                         "'' disables)")
     ap.add_argument("--browser", action="store_true",
                     help="open in the web browser instead of the app window")
     ap.add_argument("--no-browser", action="store_true",
                     help="serve only; open nothing")
     args = ap.parse_args()
+    if args.lan:
+        args.host = "0.0.0.0"
 
     if not os.path.isfile(DB_PATH):
         print("dict.sqlite not found. Run:  python setup.py")
@@ -695,8 +881,17 @@ def main():
               "The UI and dictionary still work; paste text manually.")
 
     threading.Thread(target=clipboard_monitor, args=(PAUSED,), daemon=True).start()
+    for ws_url in filter(None, (u.strip() for u in args.ws.split(","))):
+        threading.Thread(target=websocket_monitor, args=(ws_url, PAUSED),
+                         daemon=True).start()
 
     class QuietServer(ThreadingHTTPServer):
+        # On Windows, the default SO_REUSEADDR lets a second launch bind the same
+        # port while an older instance still owns it — requests then silently go
+        # to the OLD process (stale routes, "it's not working" confusion). Fail
+        # loudly instead.
+        allow_reuse_address = False
+
         def handle_error(self, request, client_address):
             # WebView/browser tabs abort in-flight requests on reload — routine,
             # not worth a stack trace. Anything else still prints.
@@ -706,11 +901,28 @@ def main():
                 return
             traceback.print_exc()
 
-    server = QuietServer((args.host, args.port), Handler)
-    url = f"http://{args.host}:{args.port}/"
+    try:
+        server = QuietServer((args.host, args.port), Handler)
+    except OSError:
+        print(f"Port {args.port} is already in use — the app is probably already "
+              f"running.\nClose the other window/terminal (or Task Manager -> "
+              f"python) and try again,\nor start with a different port:  "
+              f"python server.py --port 4040")
+        sys.exit(1)
+    # 0.0.0.0 listens everywhere but isn't a browsable address — open localhost.
+    url = f"http://{'127.0.0.1' if args.host in ('0.0.0.0', '::') else args.host}:{args.port}/"
     print(f"Down the Rabbit Hole - running at {url}")
-    print("Text sources: Attach button (embedded Textractor) or clipboard (Textractor's "
-          "Copy to Clipboard extension).")
+    if args.host in ("0.0.0.0", "::"):
+        try:
+            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            probe.connect(("8.8.8.8", 80))          # no traffic sent; just picks the LAN interface
+            lan_ip = probe.getsockname()[0]
+            probe.close()
+            print(f"LAN: http://{lan_ip}:{args.port}/  (open on your phone/tablet)")
+        except OSError:
+            pass
+    print("Text sources: Attach button (embedded Textractor), clipboard (Textractor's "
+          "Copy to Clipboard extension), or websocket (Textractor/Agent plugins).")
 
     # Standalone app window (pywebview / Edge WebView2). Falls back to the browser
     # when pywebview isn't installed or fails to open.

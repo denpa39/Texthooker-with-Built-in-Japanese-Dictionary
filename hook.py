@@ -24,7 +24,9 @@ import sys
 import threading
 from ctypes import wintypes
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Frozen (PyInstaller) builds keep textractor/ beside the .exe.
+BASE_DIR = (os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, "frozen", False)
+            else os.path.dirname(os.path.abspath(__file__)))
 CLI_X64 = os.path.join(BASE_DIR, "textractor", "x64", "TextractorCLI.exe")
 CLI_X86 = os.path.join(BASE_DIR, "textractor", "x86", "TextractorCLI.exe")
 
