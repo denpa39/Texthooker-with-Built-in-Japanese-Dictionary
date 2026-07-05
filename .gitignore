@@ -17,6 +17,7 @@ textractor/
 logs/
 exports/
 ocr_region.json
+*.exe
 build/
 dist/
 *.spec
