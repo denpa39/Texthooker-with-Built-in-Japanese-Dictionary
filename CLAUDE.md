@@ -62,10 +62,12 @@ Textractor/Agent WS servers :6677/:9001 ─┘                            │ ku
 
 "Longest *plausible* match, anchored on the tokenizer's segmentation." One sort key
 (`_sort_key`) decides everything; a longer match only beats the tokenizer's own token when the
-longer word is itself common (JMdict-common flag or VN rank ≤ 6600). Frontend passes each
-hovered token's POS/reading/base/surface from kuromoji to drive it. Any change here must keep
-`python test_ranking.py` green — those cases encode fixed bug classes (over-extension into the
-next particle, names burying real words).
+longer word is itself common (JMdict-common flag or VN rank ≤ 6600). A kana-written hover
+prefers the usually-kana homograph (JMdict `uk` on the first sense — the "uk boost"), ranked
+below the reading-priority tiers so 豆「まめ」still beats the rare uk 忠実「まめ」. Frontend
+passes each hovered token's POS/reading/base/surface from kuromoji to drive it. Any change here
+must keep `python test_ranking.py` green — those cases encode fixed bug classes (over-extension
+into the next particle, names burying real words, kana homographs).
 
 ## Hard-won gotchas (don't rediscover these)
 

@@ -371,6 +371,18 @@ def _reading_match(entry, reading_h):
     return any(to_hiragana(rk) == reading_h for rk in entry.get("r", []))
 
 
+def _has_kanji(s):
+    return any("一" <= ch <= "鿿" or ch == "々" for ch in s)
+
+
+def _uk(e):
+    """Word primarily written in kana: JMdict tags the sense 'uk' (usually kana).
+    Judged on the FIRST sense only — that's the word's main usage; a rare
+    secondary uk sense must not make the whole entry look kana-first."""
+    s = e.get("s") or []
+    return bool(s and "uk" in (s[0].get("misc") or []))
+
+
 # When a verb is written in kana, frequency-by-spelling can't tell which homograph
 # is meant (居る vs 入る vs 射る all read いる). These are the dominant reading.
 _KANA_PREF = {
@@ -503,6 +515,13 @@ def _sort_key(c, tok_len, pos, reading_h, pref):
     read_pri_ok = bool(reading_h and
                        any(to_hiragana(r) == reading_h for r in e.get("rc", [])))
     pref_ok = bool(pref and pref in e.get("k", []))
+    # Text hovered in kana -> prefer the homograph that is *usually written in
+    # kana* (uk). Generalizes the hand-listed _KANA_PREF verbs to every uk word.
+    # Neutral for kanji hovers and names, and ranked BELOW the reading-priority
+    # tiers so a JMdict-priority reading (豆「まめ」) still beats a rare uk
+    # homograph (忠実「まめ」).
+    kana_hover = not _has_kanji(c.get("matched") or "")
+    uk_ok = (not kana_hover) or is_name or _uk(e)
 
     # Cap a rare word that matches *past* the tokenizer's segment: it is almost
     # always an over-extension into the next token (そこ + に). Established longer
@@ -521,10 +540,11 @@ def _sort_key(c, tok_len, pos, reading_h, pref):
         0 if primary_read_ok else 1,       # 6. the hovered reading is the entry's primary one
         0 if read_pri_ok else 1,           # 7. the matched reading carries JMdict priority
         0 if pref_ok else 1,               # 8. known dominant kanji for a kana verb (居る > 射る)
-        len(c["reasons"]),                 # 9. fewer de-inflection steps (exact > inflected)
-        -common_lvl, -common_mag,          # 10. more common (JMdict-common tier > raw VN rank)
-        -c["len"],                         # 11. true length
-        e.get("id", ""),                   # 12. stable final tiebreak -> deterministic order
+        0 if uk_ok else 1,                 # 9. usually-kana word for a kana hover (uk boost)
+        len(c["reasons"]),                 # 10. fewer de-inflection steps (exact > inflected)
+        -common_lvl, -common_mag,          # 11. more common (JMdict-common tier > raw VN rank)
+        -c["len"],                         # 12. true length
+        e.get("id", ""),                   # 13. stable final tiebreak -> deterministic order
     )
 
 
@@ -534,7 +554,7 @@ def lookup(term, pos=None, reading=None):
         return []
     reading_h = to_hiragana(reading) if reading else None
     pref = _KANA_PREF.get(term) or _KANA_PREF.get(to_hiragana(term))
-    cands = [{"len": len(term), "reasons": [], "kind": "word", "entry": e}
+    cands = [{"len": len(term), "matched": term, "reasons": [], "kind": "word", "entry": e}
              for e in _fetch_entries_batch([term]).get(term, [])]
     cands.sort(key=lambda c: _sort_key(c, len(term), pos, reading_h, pref))
     return [c["entry"] for c in cands]

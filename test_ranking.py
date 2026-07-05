@@ -51,6 +51,11 @@ CASES = [
     ("おう -> 追う (chase)","おう",                 "動詞",   "オウ",  "おう",  "おう",  "word", "chase"),
     # -- exp POS map: 様に earns the POS tiebreak over the rare 陽に -------------
     ("ように -> 様に",      "ように見える",         "助詞",   "ヨウニ", "ように", "ように", "word", "like"),
+    # -- uk boost: kana hover prefers the usually-kana homograph ----------------
+    ("ずるい (uk)",         "ずるいなあ",           "形容詞", "ズルイ", "ずるい", "ずるい", "word", "sly"),
+    ("かける (uk)",         "かけてみた",           "動詞",   "カケ",  "かける", "かけ",  "word", "hang"),
+    # -- uk guard: a JMdict-priority reading still beats a rare uk homograph ----
+    ("まめ -> 豆 (guard)",  "まめを食べた",         "名詞",   "マメ",  "まめ",   "まめ",  "word", "legume"),
 ]
 
 # de-inflection coverage: each surface form must reach its dictionary base.
