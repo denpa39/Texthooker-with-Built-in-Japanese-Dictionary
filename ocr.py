@@ -321,32 +321,49 @@ class OcrSource:
             self.starting = False
             self.running = True
             last_hash = None
-            pending = None                  # stability gate: publish on 2nd identical read
+            last_pub = None
             while not self._stop.is_set():
-                if not self._paused.is_set():
-                    r = self.region
+                time.sleep(0.3)
+                if self._paused.is_set():
+                    continue
+                r = self.region
+                try:
+                    px = capture_bmp(r["x"], r["y"], r["w"], r["h"], _TMP_BMP)
+                except Exception:
+                    continue
+                h = hashlib.md5(px).digest()
+                if h == last_hash:
+                    continue
+                # Frame changed. Wait for the PIXELS to settle before spending an
+                # OCR — the typewriter animation is over when two samples 0.25s
+                # apart match. One OCR per line (not two) keeps latency ~0.6-0.9s
+                # and removes the double-read jitter that published near-duplicate
+                # lines. A permanent blinker (click-to-continue arrow) never
+                # settles, so give up after 4 samples and OCR anyway — the text
+                # dedupe below eats the repeats.
+                for _ in range(4):
+                    if self._stop.is_set():
+                        return
+                    time.sleep(0.25)
                     try:
-                        pixels = capture_bmp(r["x"], r["y"], r["w"], r["h"], _TMP_BMP)
+                        px = capture_bmp(r["x"], r["y"], r["w"], r["h"], _TMP_BMP)
                     except Exception:
-                        pixels = None
-                    if pixels:
-                        h = hashlib.md5(pixels).digest()
-                        if h != last_hash:              # frame changed -> OCR it
-                            last_hash = h
-                            text = _clean(engine.recognize(_TMP_BMP))
-                            if text and _has_japanese(text):
-                                # Two identical consecutive reads = the typewriter
-                                # animation finished; partial lines never publish.
-                                # (publish_line dedupes, so confirming twice is safe.)
-                                if text == pending:
-                                    self._publish(text)
-                                else:
-                                    last_hash = None   # unconfirmed — re-read next tick
-                                                       # even though the pixels froze
-                                pending = text
-                            else:
-                                pending = None
-                time.sleep(0.6)
+                        break
+                    h2 = hashlib.md5(px).digest()
+                    if h2 == h:
+                        break
+                    h = h2
+                last_hash = h
+                text = _clean(engine.recognize(_TMP_BMP))
+                if not text or not _has_japanese(text) or text == last_pub:
+                    continue
+                # Jitter guard: a SHORTER re-read of the line just published is OCR
+                # noise (blink/antialias flicker), not a new line. An EXTENDED read
+                # still publishes — the reader replaces the partial line in place.
+                if last_pub and text in last_pub:
+                    continue
+                self._publish(text)
+                last_pub = text
         except Exception as e:
             self.error = str(e)
         finally:

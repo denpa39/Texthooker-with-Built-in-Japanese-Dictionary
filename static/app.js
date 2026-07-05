@@ -230,6 +230,14 @@ function addLine(text) {
   // lines can't come from the clipboard (the server dedupes), so skip them.
   const last = linesEl.lastElementChild;
   if (last && last.dataset.raw === text) return;
+  // The new line EXTENDS the previous one (OCR caught a typewriter animation
+  // mid-line, or an NVL game appends to the same screen): replace the partial
+  // instead of stacking both. Stats count only the characters actually added.
+  let statsText = text;
+  if (last && text.startsWith(last.dataset.raw)) {
+    statsText = text.slice(last.dataset.raw.length);
+    last.remove();
+  }
   hint.classList.add("gone");
 
   document.querySelectorAll(".line.latest").forEach(e => e.classList.remove("latest"));
@@ -252,7 +260,7 @@ function addLine(text) {
   // evicted line keeps showing until closed — harmless, not worth tracking.
   while (linesEl.children.length > 300) linesEl.removeChild(linesEl.firstChild);
 
-  bumpStats(text);
+  bumpStats(statsText);
   saveSession();
 }
 
