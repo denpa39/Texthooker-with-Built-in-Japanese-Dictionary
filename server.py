@@ -32,6 +32,7 @@ from urllib.parse import urlparse, parse_qs
 
 import deinflect
 import hook
+import ocr
 
 # Frozen (PyInstaller) builds live next to their data: static/, dict.sqlite and
 # textractor/ sit beside the .exe, not inside the unpacked bundle.
@@ -198,6 +199,10 @@ def clipboard_monitor(paused_flag):
 
 
 PAUSED = threading.Event()  # set => clipboard monitoring paused
+
+# OCR fallback source (ocr.py): screenshots a user-chosen region and OCRs it —
+# for games Textractor can't hook. Pause stops it like every other source.
+ocr_source = ocr.OcrSource(publish_line, PAUSED)
 
 
 # --------------------------------------------------------------------------- #
@@ -735,6 +740,8 @@ class Handler(BaseHTTPRequestHandler):
                              "processes": hook.list_processes()})
         elif path == "/hooks":
             self._send_json(hooker.state())
+        elif path == "/ocr":
+            self._send_json(ocr_source.state())
         elif path == "/events":
             self._serve_events()
         elif path.startswith("/static/"):
@@ -765,6 +772,19 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/hookpick":
             hooker.pick(self._read_json_body().get("key"))
             self._send_json(hooker.state())
+        elif parsed.path == "/ocr/region":
+            # Opens the fullscreen drag-a-box overlay (subprocess); blocks this
+            # request until the user releases the drag or cancels.
+            region = ocr.pick_region_subprocess()
+            if region:
+                ocr_source.set_region(region)
+            self._send_json(ocr_source.state())
+        elif parsed.path == "/ocr/start":
+            err = ocr_source.start()
+            self._send_json({"error": err, **ocr_source.state()}, 400 if err else 200)
+        elif parsed.path == "/ocr/stop":
+            ocr_source.stop()
+            self._send_json(ocr_source.state())
         elif parsed.path == "/anki":
             # Proxy to AnkiConnect: the browser page can't call it directly
             # (AnkiConnect's CORS allowlist doesn't include this origin by default).
@@ -866,6 +886,10 @@ def main():
         sys.stdout.reconfigure(errors="replace")   # never crash printing to a non-UTF-8 console
     except Exception:
         pass
+    # Frozen builds re-invoke this exe as the OCR region picker (see ocr.py).
+    if "--pick-region" in sys.argv:
+        ocr.pick_region_main()
+        return
     ap = argparse.ArgumentParser(description="Down the Rabbit Hole - VN texthooker server")
     ap.add_argument("--port", type=int, default=3939)
     ap.add_argument("--host", default="127.0.0.1")

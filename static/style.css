@@ -415,6 +415,17 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 .hook-name { color: var(--accent); font-size: 11px; }
 #detachBtn.hidden { display: none; }
 
+/* OCR fallback controls at the bottom of the Attach panel. */
+.ocr-btns { display: flex; gap: 7px; margin-top: 8px; }
+.ocr-btns button {
+  flex: 1;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: 3px; padding: 6px 9px;
+  cursor: pointer; font-size: 12px; transition: border-color .15s, color .15s;
+}
+.ocr-btns button:hover { border-color: var(--accent); color: var(--accent); }
+.ocr-btns button.active { border-color: var(--accent); color: var(--accent); background: var(--panel-hi); }
+
 /* Session stats (characters read · reading speed) next to the status dot. */
 .stats {
   font-size: 11px; letter-spacing: .02em;

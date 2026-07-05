@@ -873,6 +873,49 @@ async function refreshProcesses() {
   });
 }
 
+/* OCR fallback controls (bottom of the Attach panel) */
+const ocrMsg = document.getElementById("ocrMsg");
+const ocrArea = document.getElementById("ocrArea");
+const ocrToggle = document.getElementById("ocrToggle");
+const OCR_HINT = "For games that won't hook — reads text straight off the screen. " +
+                 "Pick just the text box, not the whole window.";
+
+function renderOcrState(st) {
+  ocrToggle.textContent = (st.running || st.starting) ? "Stop OCR" : "Start OCR";
+  ocrToggle.classList.toggle("active", !!(st.running || st.starting));
+  if (st.error) {
+    ocrMsg.textContent = "OCR: " + st.error;
+  } else if (st.starting) {
+    ocrMsg.textContent = "OCR starting… (first start loads the engine, give it a moment)";
+  } else if (st.running) {
+    const r = st.region;
+    ocrMsg.textContent = `OCR watching ${r.w}×${r.h} px via ${st.engine} — new text ` +
+                         "appears here as the game shows it.";
+  } else if (st.region) {
+    const r = st.region;
+    ocrMsg.textContent = `Area saved (${r.w}×${r.h} px). Start OCR when the game is visible.`;
+  } else {
+    ocrMsg.textContent = OCR_HINT;
+  }
+}
+
+async function refreshOcr() {
+  try { renderOcrState(await (await fetch("/ocr")).json()); } catch (_) {}
+}
+
+ocrArea.addEventListener("click", async () => {
+  ocrMsg.textContent = "Drag a box over the game's text on the dimmed screen (Esc cancels)…";
+  try { renderOcrState(await jpost("/ocr/region")); } catch (_) { refreshOcr(); }
+});
+ocrToggle.addEventListener("click", async () => {
+  const stopping = ocrToggle.classList.contains("active");
+  try {
+    const st = await jpost(stopping ? "/ocr/stop" : "/ocr/start");
+    renderOcrState(st);
+    if (st.error && !stopping) ocrMsg.textContent = "OCR: " + st.error;
+  } catch (_) { refreshOcr(); }
+});
+
 function toggleHookPanel(show) {
   const hidden = show === undefined ? !hookPanel.classList.contains("hidden") : !show;
   hookPanel.classList.toggle("hidden", hidden);
@@ -883,8 +926,10 @@ function toggleHookPanel(show) {
       renderHookState(st);
       if (!st.attached) refreshProcesses();
     })();
+    refreshOcr();
     hookPoll = setInterval(async () => {
       renderHookState(await (await fetch("/hooks")).json());
+      refreshOcr();   // engine startup / errors surface without reopening the panel
     }, 1000);
   }
 }

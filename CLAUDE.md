@@ -36,16 +36,25 @@ UI verification: use the preview tools with `.claude/launch.json` server **"text
 ```
 game ──embedded TextractorCLI (hook.py)──┐
 game ──Textractor → clipboard (ctypes)───┤→ publish_line() → logs/ + SSE /events → browser
-Textractor/Agent WS servers :6677/:9001 ─┘                            │ kuromoji tokenizes in-browser
-                                              dict.sqlite ←── /scan ──┘ hover popup
+Textractor/Agent WS servers :6677/:9001 ─┤                            │ kuromoji tokenizes in-browser
+game window ──screen OCR (ocr.py)────────┘   dict.sqlite ←── /scan ──┘ hover popup
 ```
 
 - **server.py** — everything server-side: clipboard poller, websocket *client* (stdlib RFC 6455,
   connects OUT to Textractor plugin :6677 / Agent :9001), Textractor driver glue, HTTP routes,
   SSE broadcast, dictionary lookup + ranking. Routes: `/scan` (ranked longest-match lookup — the
   core), `/lookup`, `/kanji`, `/events` (SSE), `/state`, `/pause`, `/processes` `/hooks` `/attach`
-  `/detach` `/hookpick` (game hooking), `/anki` (proxy to AnkiConnect :8765 — CORS workaround),
-  `/export` (writes exports/*.txt + opens Explorer — WebView2 can't blob-download).
+  `/detach` `/hookpick` (game hooking), `/ocr` `/ocr/region` `/ocr/start` `/ocr/stop` (OCR
+  fallback), `/anki` (proxy to AnkiConnect :8765 — CORS workaround), `/export` (writes
+  exports/*.txt + opens Explorer — WebView2 can't blob-download).
+- **ocr.py** — OCR fallback for unhookable games: tkinter drag-a-box region picker (run as a
+  SUBPROCESS — must not share a main thread with pywebview; frozen builds re-invoke the exe
+  with `--pick-region`), ctypes GDI region screenshot → BMP, engines = manga-ocr (optional
+  pip, best) else Windows.Media.Ocr via a persistent PowerShell worker (WinRT types need
+  explicit `[Type,Assembly,ContentType=WindowsRuntime]` activation lines — missing one fails
+  before READY). Pixel-hash skips unchanged frames; a line publishes only after two identical
+  consecutive reads (typewriter-animation filter). Region persists in `ocr_region.json`
+  (gitignored).
 - **hook.py** — drives `textractor/x64|x86/TextractorCLI.exe` as a child process (UTF-16-LE
   stdout, one line per sentence). One attached game at a time; user picks the hook channel.
 - **setup.py** — downloads everything and builds `dict.sqlite` (gitignored). Tables: `entries`,

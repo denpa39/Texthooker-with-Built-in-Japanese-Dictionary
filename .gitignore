@@ -16,6 +16,7 @@ textractor/
 # Session logs + exports written by the server, and PyInstaller build output
 logs/
 exports/
+ocr_region.json
 build/
 dist/
 *.spec

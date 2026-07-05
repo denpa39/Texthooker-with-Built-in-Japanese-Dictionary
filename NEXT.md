@@ -10,6 +10,13 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 ## Remaining ideas
 
 - **Word audio** — 🔊 button, Yomitan-style JapanesePod101 URL. Needs internet; optional.
+- **OCR niceties** — multi-monitor region picker (current overlay covers the primary
+  monitor), optional per-region preprocessing (upscale/threshold) for low-contrast text.
+
+## Done (2026-07-06)
+
+OCR fallback mode (`ocr.py`): drag-select screen region, GDI capture, manga-ocr
+(optional) or Windows OCR, typewriter-animation stability gate, region persisted.
 
 ## Done (2026-07-02 sweep, trimmed 07-03 per user feedback)
 

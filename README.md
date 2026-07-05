@@ -42,6 +42,21 @@ internally (`textractor/`, GPL-3.0). The old way still works too: run Textractor
 yourself with its **Copy to Clipboard** extension — the app watches the clipboard
 as a fallback.
 
+### OCR mode (for games that won't hook)
+
+Some engines defeat every hook. Plan B, built in:
+
+1. Open **Attach** → **OCR fallback** → **Select text area**, and drag a box over
+   the game's *text box only* (skip menus/UI so they don't get read).
+2. **Start OCR.** The app watches that area and reads new text automatically —
+   partial lines from typewriter animations are filtered out, and the area is
+   remembered across restarts.
+
+Recognition uses **manga-ocr** if installed (`python -m pip install manga-ocr`,
+~400 MB — a model built specifically for Japanese game/manga text, strongly
+recommended for OCR mode), otherwise Windows' built-in Japanese OCR (needs the
+Japanese language pack: Settings → Time & Language → Language).
+
 **Tip:** click a word to pin its popup open; press **Esc** to close. Hover gives a quick peek.
 
 ### Visual-novel frequency ranking (optional, recommended for VN readers)

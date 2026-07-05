@@ -73,6 +73,13 @@
   <div id="procList" class="proc-list"></div>
   <div id="hookList" class="hook-list"></div>
   <button id="detachBtn" class="set-reset hidden">Detach</button>
+  <div class="set-label">OCR fallback</div>
+  <div id="ocrMsg" class="hook-msg">For games that won't hook — reads text straight off
+    the screen. Pick just the text box, not the whole window.</div>
+  <div class="ocr-btns">
+    <button id="ocrArea" title="Drag a box over the game's text area (Esc cancels)">Select text area</button>
+    <button id="ocrToggle" title="Watch the selected area and read new text automatically">Start OCR</button>
+  </div>
 </aside>
 
 <main id="lines" lang="ja"></main>
