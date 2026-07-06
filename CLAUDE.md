@@ -110,7 +110,11 @@ pitch-accent contour graph. History in NEXT.md.
   every time). Commit messages: normal English, explain the "why".
 - Stats/UI text in English (user rejected 字/字時).
 - All UI colours must derive from the 6 theme vars (`--bg --text --accent --accent-2 --pos
-  --danger`) — never hardcode a colour in style.css except the status dot.
+  --danger`) — never hardcode a colour in style.css except the status dot and the
+  theme-agnostic lighting effects (`--shadow`, `--glass-spec`).
+- UI style is "liquid glass": chrome surfaces (toolbar/popup/panels/hint) are translucent
+  `--glass-*` + backdrop-filter over an ambient body gradient; a no-backdrop-filter
+  fallback at the end of style.css keeps them solid. Reader lines stay non-glass.
 - README.md and NEXT.md are kept in sync with feature changes; NEXT.md lists backlog +
   removed-features memory.
 - Licences matter: deinflect_data.py is GPL-3.0 (from Yomitan), Textractor GPL-3.0,

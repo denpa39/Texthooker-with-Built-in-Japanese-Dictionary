@@ -40,6 +40,14 @@
   --radius: 8px;      /* one corner radius everywhere — surfaces feel of a piece */
   --serif: "Noto Serif JP", "Yu Mincho", serif;   /* bundled — brand + headwords */
 
+  /* Liquid glass: chrome surfaces are frosted translucencies over a soft ambient
+     gradient. The specular edge is a lighting effect — like --shadow it stays
+     theme-agnostic (a glass highlight is white in every palette). */
+  --glass-blur: blur(22px) saturate(1.5);
+  --glass-bg: color-mix(in srgb, var(--bg-soft) 62%, transparent);
+  --glass-line: color-mix(in srgb, var(--text) 16%, transparent);
+  --glass-spec: rgba(255, 255, 255, .28);
+
   /* typography */
   --font-family: "Segoe UI", system-ui, sans-serif;
   --font-size: 30px;
@@ -67,7 +75,13 @@
 }
 html, body { height: 100%; margin: 0; }
 body {
-  background: var(--bg);   /* flat & editorial — gradients removed */
+  /* Soft ambient colour fields — the light the glass surfaces refract.
+     All derived from the theme, so every palette glows in its own hues. */
+  background:
+    radial-gradient(1100px 700px at 8% -10%, var(--grad1), transparent 60%),
+    radial-gradient(900px 600px at 100% 0%, var(--grad2), transparent 55%),
+    radial-gradient(1300px 900px at 50% 120%, var(--grad2), transparent 60%),
+    var(--bg);
   color: var(--text);
   font-family: var(--font-family);
   display: flex;
@@ -82,9 +96,16 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px 32px;
-  background: var(--accent);
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 80%, black);
+  padding: 10px 20px;
+  /* accent-tinted liquid glass: translucent enough to frost, opaque enough
+     that --on-accent text keeps its contrast in every theme */
+  background: color-mix(in srgb, var(--accent) 72%, transparent);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid color-mix(in srgb, var(--on-accent) 30%, transparent);
+  box-shadow: inset 0 1px 0 var(--glass-spec), 0 8px 24px rgba(0, 0, 0, .16);
+  border-radius: 18px;
+  margin: 10px 12px 2px;
   position: sticky;
   top: 0;
   z-index: 20;
@@ -103,8 +124,8 @@ body {
   background: transparent;
   color: var(--on-accent);
   border: 1px solid transparent;
-  border-radius: 5px;
-  padding: 6px 10px;
+  border-radius: 999px;
+  padding: 6px 12px;
   cursor: pointer;
   font-size: 13px;
   letter-spacing: .02em;
@@ -143,7 +164,7 @@ body {
 }
 
 /* Reader text-alignment segmented control + line-spacing dropdown. */
-.seg { display: inline-flex; align-items: stretch; border: 1px solid color-mix(in srgb, var(--on-accent) 40%, var(--accent)); border-radius: 3px; overflow: hidden; }
+.seg { display: inline-flex; align-items: stretch; border: 1px solid color-mix(in srgb, var(--on-accent) 40%, var(--accent)); border-radius: 999px; overflow: hidden; }
 #toolbar .seg button {
   background: transparent; color: color-mix(in srgb, var(--on-accent) 75%, var(--accent));
   border: none; border-left: 1px solid color-mix(in srgb, var(--on-accent) 40%, var(--accent)); border-radius: 0;
@@ -176,10 +197,12 @@ body {
   width: 280px;
   max-height: calc(100vh - 76px);
   overflow-y: auto;
-  background: var(--bg-soft);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-line);
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 var(--glass-spec), var(--shadow);
   padding: 14px 16px 16px;
   font-size: 13px;
 }
@@ -295,10 +318,12 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
   max-width: min(440px, calc(100vw - 20px));
   max-height: 60vh;
   overflow-y: auto;
-  background: var(--bg-soft);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-line);
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 var(--glass-spec), var(--shadow);
   padding: 14px 16px;
   font-size: 15px;
   line-height: 1.5;
@@ -372,11 +397,15 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 
 /* Hint ----------------------------------------------------------------- */
 .hint {
-  position: fixed; bottom: 0; left: 0; right: 0;
-  text-align: center; padding: 13px;
+  position: fixed; bottom: 10px; left: 12px; right: 12px;
+  text-align: center; padding: 12px 16px;
   color: var(--muted); font-size: 13px; line-height: 1.6;
-  background: color-mix(in srgb, var(--bg-soft) 92%, transparent);
-  border-top: 1px solid var(--line);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-line);
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 var(--glass-spec), var(--shadow);
   pointer-events: none;
 }
 .hint.gone { display: none; }
@@ -392,7 +421,10 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 .popup-foot {
   position: sticky; bottom: -14px;
   margin: 10px -16px -14px; padding: 7px 16px;
-  background: var(--bg-soft); border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-soft) 55%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-top: 1px solid var(--glass-line);
   font-size: 11px; color: var(--muted); text-align: center; letter-spacing: .02em;
 }
 /* Clear-all asks once before wiping everything. */
@@ -483,7 +515,7 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
   background: color-mix(in srgb, var(--on-accent) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--on-accent) 40%, var(--accent));
   color: var(--on-accent);
-  border-radius: 3px; padding: 5px 8px; font-size: 13px; width: 130px;
+  border-radius: 999px; padding: 5px 12px; font-size: 13px; width: 130px;
 }
 #lookupBox::placeholder { color: color-mix(in srgb, var(--on-accent) 60%, var(--accent)); }
 #lookupBox:focus { outline: none; background: var(--on-accent); color: var(--accent); }
@@ -518,4 +550,11 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 }
 @media (max-width: 420px) {
   .settings { left: 10px; right: 10px; top: auto; bottom: 10px; width: auto; max-height: 55vh; }
+}
+
+/* No backdrop-filter support (old engines): fall back to solid surfaces so the
+   glass tint never leaves text floating on a busy gradient. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  #toolbar { background: var(--accent); }
+  .popup, .settings, .hint, .popup-foot { background: var(--bg-soft); }
 }
