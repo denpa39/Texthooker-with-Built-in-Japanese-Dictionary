@@ -15,10 +15,13 @@ Engines, best first:
 """
 
 import base64
+import collections
 import ctypes
+import difflib
 import hashlib
 import json
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -75,17 +78,28 @@ def save_region(r):
 # --------------------------------------------------------------------------- #
 def capture_bmp(x, y, w, h, path):
     """Screenshot the region into a .bmp; returns the raw pixel bytes (for the
-    cheap changed-frame hash). Windows only."""
+    cheap changed-frame hash). Windows only.
+
+    The capture is upscaled 2x (smooth HALFTONE interpolation): VN fonts are
+    small, and Windows OCR loses dakuten dots at that size (だ read as た).
+    Twice the glyph size recovers them. Very large regions stay 1:1."""
+    scale = 2 if w * h <= 1_200_000 else 1
+    sw, sh = w * scale, h * scale
     hdc = user32.GetDC(None)
     mem = gdi32.CreateCompatibleDC(hdc)
-    bmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
+    bmp = gdi32.CreateCompatibleBitmap(hdc, sw, sh)
     old = gdi32.SelectObject(mem, bmp)
     try:
-        gdi32.BitBlt(mem, 0, 0, w, h, hdc, x, y, _SRCCOPY)
-        bih = _BITMAPINFOHEADER(biSize=40, biWidth=w, biHeight=-h,  # negative = top-down
+        if scale == 1:
+            gdi32.BitBlt(mem, 0, 0, w, h, hdc, x, y, _SRCCOPY)
+        else:
+            gdi32.SetStretchBltMode(mem, 4)          # HALFTONE
+            gdi32.SetBrushOrgEx(mem, 0, 0, None)
+            gdi32.StretchBlt(mem, 0, 0, sw, sh, hdc, x, y, w, h, _SRCCOPY)
+        bih = _BITMAPINFOHEADER(biSize=40, biWidth=sw, biHeight=-sh,  # negative = top-down
                                 biPlanes=1, biBitCount=32, biCompression=0)
-        buf = (ctypes.c_char * (w * h * 4))()
-        gdi32.GetDIBits(mem, bmp, 0, h, buf, ctypes.byref(bih), 0)
+        buf = (ctypes.c_char * (sw * sh * 4))()
+        gdi32.GetDIBits(mem, bmp, 0, sh, buf, ctypes.byref(bih), 0)
         pixels = bytes(buf)
     finally:
         gdi32.SelectObject(mem, old)
@@ -267,10 +281,18 @@ def _has_japanese(s):
     return any("぀" <= ch <= "ヿ" or "一" <= ch <= "鿿" or ch == "々" for ch in s)
 
 
+# Blinking click-to-continue cursors OCR as stray marks at the line's edges —
+# strip them. Sentence enders (。！？…) are NOT in this set.
+_EDGE_JUNK = "・･•‥▼▽►◄◆■□●○★☆"
+
+
 def _clean(text):
     """Windows OCR spaces out Japanese 'words'; VN lines never need ASCII spaces.
-    Joined OCR lines become one reader line."""
-    return text.replace("\n", "").replace(" ", "").replace("　", "").strip()
+    Joined OCR lines become one reader line. Also repairs the classic Japanese
+    OCR confusions: a lone dash before a kanji is a misread 一 (-番 -> 一番)."""
+    text = text.replace("\n", "").replace(" ", "").replace("　", "")
+    text = re.sub(r"[-−－](?=[一-鿿])", "一", text)
+    return text.strip(_EDGE_JUNK).strip()
 
 
 class OcrSource:
@@ -321,7 +343,7 @@ class OcrSource:
             self.starting = False
             self.running = True
             last_hash = None
-            last_pub = None
+            recent = collections.deque(maxlen=5)   # last published lines
             while not self._stop.is_set():
                 time.sleep(0.3)
                 if self._paused.is_set():
@@ -355,15 +377,23 @@ class OcrSource:
                     h = h2
                 last_hash = h
                 text = _clean(engine.recognize(_TMP_BMP))
-                if not text or not _has_japanese(text) or text == last_pub:
+                if not text or not _has_japanese(text):
                     continue
-                # Jitter guard: a SHORTER re-read of the line just published is OCR
-                # noise (blink/antialias flicker), not a new line. An EXTENDED read
-                # still publishes — the reader replaces the partial line in place.
-                if last_pub and text in last_pub:
+                # Jitter guards, checked against the last few published lines (a
+                # blinking cursor keeps changing the pixels, so the same screen
+                # text gets re-OCRed many times, each read slightly different):
+                #  - exact repeat or a SHORTER re-read (substring) -> noise, skip
+                #  - an EXTENDED read of a recent line publishes — the reader
+                #    replaces the partial in place
+                #  - otherwise near-identical (>=85% similar — だ read as た is one
+                #    char out of a whole line) -> the same line misread, skip
+                if any(text in r for r in recent):
+                    continue
+                if not any(r in text for r in recent) and \
+                   any(difflib.SequenceMatcher(None, text, r).ratio() >= 0.85 for r in recent):
                     continue
                 self._publish(text)
-                last_pub = text
+                recent.append(text)
         except Exception as e:
             self.error = str(e)
         finally:
