@@ -295,6 +295,16 @@ def _clean(text):
     return text.strip(_EDGE_JUNK).strip()
 
 
+# Trailing chars stripped to form a dedup KEY. OCR catches the sentence-ending 。
+# only intermittently, so one line reads as "…した" then "…した。" frame to frame;
+# both share a key, so the line is published once (upgraded when the maru lands).
+_TRAIL = "。．.｡、，,！？!?…‥・ 　　\n"
+
+
+def _norm(text):
+    return text.rstrip(_TRAIL)
+
+
 class OcrSource:
     """Screenshot-diff-OCR loop. publish() is server.publish_line — it dedupes,
     logs and broadcasts like every other text source."""
@@ -343,7 +353,7 @@ class OcrSource:
             self.starting = False
             self.running = True
             last_hash = None
-            recent = collections.deque(maxlen=5)   # last published lines
+            recent = collections.deque(maxlen=6)   # (key, raw) of recent publishes
             while not self._stop.is_set():
                 time.sleep(0.3)
                 if self._paused.is_set():
@@ -379,21 +389,31 @@ class OcrSource:
                 text = _clean(engine.recognize(_TMP_BMP))
                 if not text or not _has_japanese(text):
                     continue
-                # Jitter guards, checked against the last few published lines (a
-                # blinking cursor keeps changing the pixels, so the same screen
-                # text gets re-OCRed many times, each read slightly different):
-                #  - exact repeat or a SHORTER re-read (substring) -> noise, skip
-                #  - an EXTENDED read of a recent line publishes — the reader
-                #    replaces the partial in place
-                #  - otherwise near-identical (>=85% similar — だ read as た is one
-                #    char out of a whole line) -> the same line misread, skip
-                if any(text in r for r in recent):
+                # Jitter guards against the last few published lines. A blinking
+                # cursor re-OCRs the same screen text repeatedly, each read a bit
+                # different (だ/た, cursor dot, and above all the 。 blinking in
+                # and out). Compare on a KEY with trailing punctuation stripped so
+                # "…した" and "…した。" count as one line:
+                if any(text == raw for _, raw in recent):
+                    continue                                   # exact re-read
+                key = _norm(text)
+                if not key:
                     continue
-                if not any(r in text for r in recent) and \
-                   any(difflib.SequenceMatcher(None, text, r).ratio() >= 0.85 for r in recent):
-                    continue
+                same = [raw for k, raw in recent if key == k or key in k]
+                if same:
+                    # Same underlying line (punctuation/cursor flicker). Republish
+                    # ONLY if this read extends the FULLEST version already shown
+                    # (the maru finally recognized) — so the reader upgrades in
+                    # place. A mere punctuation swap (。/./．, same length) is jitter.
+                    longest = max(same, key=len)
+                    if not (text.startswith(longest) and len(text) > len(longest)):
+                        continue
+                elif not any(k in key for k, _ in recent) and \
+                     any(difflib.SequenceMatcher(None, key, k).ratio() >= 0.85
+                         for k, _ in recent):
+                    continue                                   # same line, misread (だ→た)
                 self._publish(text)
-                recent.append(text)
+                recent.append((key, text))
         except Exception as e:
             self.error = str(e)
         finally:

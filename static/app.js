@@ -230,9 +230,15 @@ function addLine(text) {
   // lines can't come from the clipboard (the server dedupes), so skip them.
   const last = linesEl.lastElementChild;
   if (last && last.dataset.raw === text) return;
+  // Punctuation-only flicker (OCR loses the sentence-ending 。 between frames):
+  // "…した。" then "…した" is the same line, not a new one — ignore the shorter
+  // re-read so it can't stack under the fuller version already shown.
+  const strip = s => s.replace(/[。．.｡、，,！？!?…‥・\s]+$/u, "");
+  if (last && strip(last.dataset.raw) === strip(text) && text.length <= last.dataset.raw.length)
+    return;
   // The new line EXTENDS the previous one (OCR caught a typewriter animation
-  // mid-line, or an NVL game appends to the same screen): replace the partial
-  // instead of stacking both. Stats count only the characters actually added.
+  // mid-line, the maru finally landed, or an NVL game appends to the same
+  // screen): replace the partial instead of stacking. Stats count only the added.
   let statsText = text;
   if (last && text.startsWith(last.dataset.raw)) {
     statsText = text.slice(last.dataset.raw.length);
