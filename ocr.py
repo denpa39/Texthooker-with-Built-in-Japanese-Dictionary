@@ -283,7 +283,7 @@ def _has_japanese(s):
 
 # Blinking click-to-continue cursors OCR as stray marks at the line's edges —
 # strip them. Sentence enders (。！？…) are NOT in this set.
-_EDGE_JUNK = "・･•‥▼▽►◄◆■□●○★☆"
+_EDGE_JUNK = "・･•‥▼▽►◄▶◀◆◇■□●○◎◉⊙⊚★☆♦♢»«‹›"
 
 
 def _clean(text):
@@ -292,7 +292,13 @@ def _clean(text):
     OCR confusions: a lone dash before a kanji is a misread 一 (-番 -> 一番)."""
     text = text.replace("\n", "").replace(" ", "").replace("　", "")
     text = re.sub(r"[-−－](?=[一-鿿])", "一", text)
-    return text.strip(_EDGE_JUNK).strip()
+    text = text.strip(_EDGE_JUNK).strip()
+    # A short ASCII/dash tail after Japanese is almost always UI junk — a page
+    # marker or a cursor glyph read as "-6". Drop it (then re-strip any mark it
+    # was hiding). Pure-ASCII lines are left for the _has_japanese gate to reject.
+    if _has_japanese(text):
+        text = re.sub(r"[-−–—_=+~A-Za-z0-9]{1,6}$", "", text).strip(_EDGE_JUNK).strip()
+    return text
 
 
 # Trailing chars stripped to form a dedup KEY. OCR catches the sentence-ending 。
@@ -303,6 +309,20 @@ _TRAIL = "。．.｡、，,！？!?…‥・ 　　\n"
 
 def _norm(text):
     return text.rstrip(_TRAIL)
+
+
+def _same_line(a, b):
+    """Two OCR reads of (probably) the same on-screen line? Poor OCR flips one
+    kana per read (だ↔た, 葵 dropped…), which on a short line barely dents the
+    similarity ratio — so the threshold loosens as the line shrinks. A short
+    string fully contained in a longer one is a truncated re-read, also same."""
+    if a == b:
+        return True
+    short, long = sorted((a, b), key=len)
+    if short and short in long:
+        return True
+    thr = 0.7 if len(long) <= 6 else 0.82
+    return difflib.SequenceMatcher(None, a, b).ratio() >= thr
 
 
 class OcrSource:
@@ -399,19 +419,16 @@ class OcrSource:
                 key = _norm(text)
                 if not key:
                     continue
-                same = [raw for k, raw in recent if key == k or key in k]
+                # Reads of the same on-screen line (punctuation flicker, a kana
+                # misread, a blinking ◎ cursor) collapse via _same_line. Republish
+                # ONLY when this read extends the fullest version already shown —
+                # the maru/tail finally recognized — so the reader upgrades in
+                # place. Any equal-or-shorter re-read of that line is jitter.
+                same = [raw for k, raw in recent if _same_line(key, k)]
                 if same:
-                    # Same underlying line (punctuation/cursor flicker). Republish
-                    # ONLY if this read extends the FULLEST version already shown
-                    # (the maru finally recognized) — so the reader upgrades in
-                    # place. A mere punctuation swap (。/./．, same length) is jitter.
                     longest = max(same, key=len)
                     if not (text.startswith(longest) and len(text) > len(longest)):
                         continue
-                elif not any(k in key for k, _ in recent) and \
-                     any(difflib.SequenceMatcher(None, key, k).ratio() >= 0.85
-                         for k, _ in recent):
-                    continue                                   # same line, misread (だ→た)
                 self._publish(text)
                 recent.append((key, text))
         except Exception as e:
