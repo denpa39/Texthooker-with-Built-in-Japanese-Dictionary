@@ -276,8 +276,8 @@ body {
   margin-block: 0 .7em;
   margin-inline: var(--line-ml, auto) var(--line-mr, auto);
   text-align: var(--text-align);  /* left / center / right / justify (toolbar segment) */
-  padding: 6px 14px;
-  border-radius: var(--radius);
+  padding: 6px 16px;
+  border-radius: 14px;
   transition: background .2s, color .2s;
   position: relative;
 }
@@ -298,7 +298,7 @@ body {
 }
 .sentence { word-break: break-word; }
 
-.token { border-radius: 2px; cursor: default; transition: background .1s, color .1s; }
+.token { border-radius: 6px; cursor: default; transition: background .1s, color .1s; }
 .token.word { cursor: pointer; }   /* click pins the popup; hover peeks */
 .token.word:hover,
 .token.word:focus-visible { background: var(--accent); color: var(--on-accent); outline: none; }
