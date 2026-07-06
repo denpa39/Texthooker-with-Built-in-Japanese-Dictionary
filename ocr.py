@@ -267,11 +267,15 @@ class MangaOcr:
 
 
 def make_engine():
-    try:
-        import manga_ocr  # noqa: F401 — cheap existence check before the heavy load
-        return MangaOcr()
-    except ImportError:
-        return WindowsOcr()
+    # manga-ocr disabled for now — it hallucinates plausible Japanese from
+    # visual noise (gradients, animated backgrounds).  Windows OCR doesn't.
+    # To re-enable: uncomment the try/except block below.
+    # try:
+    #     import manga_ocr  # noqa: F401
+    #     return MangaOcr()
+    # except ImportError:
+    #     pass
+    return WindowsOcr()
 
 
 # --------------------------------------------------------------------------- #
