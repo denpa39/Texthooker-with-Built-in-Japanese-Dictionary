@@ -222,7 +222,7 @@ body {
 .settings .preset {
   display: flex; align-items: center; gap: 6px;
   background: var(--panel); border: 1px solid var(--line);
-  border-radius: 3px; padding: 5px 9px 5px 7px; cursor: pointer;
+  border-radius: 10px; padding: 5px 9px 5px 7px; cursor: pointer;
   color: var(--text); font-size: 12px; transition: border-color .15s;
 }
 .settings .preset:hover { border-color: var(--accent); }
@@ -234,17 +234,17 @@ body {
 }
 .settings .colors input[type="color"] {
   inline-size: 30px; block-size: 22px; padding: 0;
-  border: 1px solid var(--line); border-radius: 5px; background: none; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 8px; background: none; cursor: pointer;
 }
 .settings select {
   width: 100%; background: var(--panel); color: var(--text);
-  border: 1px solid var(--line); border-radius: 3px; padding: 7px 9px; cursor: pointer; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 10px; padding: 7px 9px; cursor: pointer; font-size: 13px;
 }
 .style-toggles { display: flex; gap: 7px; margin-top: 8px; }
 .style-toggle {
   flex: 1;
   background: var(--panel); color: var(--text);
-  border: 1px solid var(--line); border-radius: 3px;
+  border: 1px solid var(--line); border-radius: 10px;
   padding: 6px; cursor: pointer; font-size: 14px;
   transition: border-color .15s, color .15s;
 }
@@ -253,7 +253,7 @@ body {
 .settings .set-reset {
   margin-top: 16px; width: 100%;
   background: var(--panel); color: var(--text);
-  border: 1px solid var(--line); border-radius: 3px; padding: 8px; cursor: pointer; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px; cursor: pointer; font-size: 13px;
   transition: border-color .15s, color .15s;
 }
 .settings .set-reset:hover { border-color: var(--danger); color: var(--danger); }
@@ -391,7 +391,7 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 .pin-close {
   float: right; margin: -4px -6px 2px 0;
   background: var(--panel); color: var(--muted); border: 1px solid var(--line);
-  border-radius: 3px; width: 24px; height: 24px; cursor: pointer; font-size: 15px; line-height: 1;
+  border-radius: 50%; width: 24px; height: 24px; cursor: pointer; font-size: 15px; line-height: 1;
 }
 .pin-close:hover { color: var(--danger); border-color: var(--danger); }
 
@@ -435,7 +435,7 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 .proc-item, .hook-item {
   display: flex; flex-direction: column; gap: 2px; width: 100%;
   background: var(--panel); color: var(--text); text-align: left;
-  border: 1px solid var(--line); border-radius: 3px;
+  border: 1px solid var(--line); border-radius: 10px;
   padding: 7px 9px; margin-bottom: 6px; cursor: pointer; font-size: 12px;
   transition: border-color .15s;
 }
@@ -452,7 +452,7 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 .ocr-btns button {
   flex: 1;
   background: var(--panel); color: var(--text);
-  border: 1px solid var(--line); border-radius: 3px; padding: 6px 9px;
+  border: 1px solid var(--line); border-radius: 10px; padding: 6px 9px;
   cursor: pointer; font-size: 12px; transition: border-color .15s, color .15s;
 }
 .ocr-btns button:hover { border-color: var(--accent); color: var(--accent); }
@@ -525,7 +525,7 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 .set-text input {
   flex: 1; min-width: 0;
   background: var(--panel); color: var(--text);
-  border: 1px solid var(--line); border-radius: 3px; padding: 6px 8px; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; font-size: 13px;
 }
 
 /* Responsive — narrow windows / phones (LAN mode) ---------------------- */
