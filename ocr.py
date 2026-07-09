@@ -7,9 +7,11 @@ screenshots that region (ctypes GDI, no dependencies), skips unchanged frames by
 pixel hash, OCRs changed ones, and publishes a line only after two consecutive
 identical reads — so a VN's typewriter animation doesn't spam partial lines.
 
-Engines, best first:
+Engines:
   - manga-ocr  (pip install manga-ocr) — transformer model built for Japanese
     game/manga text; by far the best quality. Optional, ~400 MB with torch.
+    Generative, so it hallucinates text from no-text frames — always used
+    behind a Windows-OCR text-presence gate (HybridOcr).
   - Windows built-in OCR (Windows.Media.Ocr via a persistent PowerShell worker)
     — decent, zero install; needs the Japanese language pack.
 """
@@ -266,16 +268,41 @@ class MangaOcr:
         pass
 
 
+class HybridOcr:
+    """Windows OCR gates, manga-ocr reads. manga-ocr is a generative model: on a
+    frame with no text (gradient, animated background) it invents plausible
+    Japanese. Windows OCR never does that — so a frame only goes to manga-ocr
+    when Windows OCR independently saw Japanese on it. Garbled-but-present
+    Windows reads are fine: they only need to prove text exists."""
+
+    name = "manga-ocr"
+
+    def __init__(self):
+        self._gate = WindowsOcr()
+        self._m = MangaOcr()
+
+    def recognize(self, bmp_path):
+        if not _has_japanese(self._gate.recognize(bmp_path)):
+            return ""
+        return self._m.recognize(bmp_path)
+
+    def close(self):
+        self._gate.close()
+        self._m.close()
+
+
 def make_engine():
-    # manga-ocr disabled for now — it hallucinates plausible Japanese from
-    # visual noise (gradients, animated backgrounds).  Windows OCR doesn't.
-    # To re-enable: uncomment the try/except block below.
-    # try:
-    #     import manga_ocr  # noqa: F401
-    #     return MangaOcr()
-    # except ImportError:
-    #     pass
-    return WindowsOcr()
+    try:
+        import manga_ocr  # noqa: F401
+    except ImportError:
+        return WindowsOcr()
+    try:
+        return HybridOcr()
+    except RuntimeError:
+        # No Japanese language pack = no gate. Ungated manga-ocr hallucinates
+        # on no-text frames, so plain manga-ocr is worse than it looks — but
+        # it's the only engine left. The jitter guards catch some of it.
+        return MangaOcr()
 
 
 # --------------------------------------------------------------------------- #

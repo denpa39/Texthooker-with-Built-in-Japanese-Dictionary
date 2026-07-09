@@ -49,12 +49,13 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   exports/*.txt + opens Explorer — WebView2 can't blob-download).
 - **ocr.py** — OCR fallback for unhookable games: tkinter drag-a-box region picker (run as a
   SUBPROCESS — must not share a main thread with pywebview; frozen builds re-invoke the exe
-  with `--pick-region`), ctypes GDI region screenshot → BMP, engine = Windows.Media.Ocr via a
-  persistent PowerShell worker — manga-ocr is DISABLED in make_engine(): generative model,
-  hallucinates Japanese from no-text frames; don't re-enable without a text-presence gate
-  (WinRT types need
+  with `--pick-region`), ctypes GDI region screenshot → BMP. Engine = `HybridOcr` when
+  manga-ocr is installed: Windows.Media.Ocr (persistent PowerShell worker) runs first as a
+  text-presence gate, manga-ocr reads the frame only if Windows saw Japanese — manga-ocr is
+  generative and hallucinates Japanese from no-text frames, NEVER run it ungated. Without
+  manga-ocr installed: plain Windows OCR (WinRT types need
   explicit `[Type,Assembly,ContentType=WindowsRuntime]` activation lines — missing one fails
-  before READY). Pixel-hash skips unchanged frames; a line publishes only after two identical
+  before READY). Clipboard source drops non-Japanese text (copied paths/hashes). Pixel-hash skips unchanged frames; a line publishes only after two identical
   consecutive reads (typewriter-animation filter). Region persists in `ocr_region.json`
   (gitignored).
 - **hook.py** — drives `textractor/x64|x86/TextractorCLI.exe` as a child process (UTF-16-LE

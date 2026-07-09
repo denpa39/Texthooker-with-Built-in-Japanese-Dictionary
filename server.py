@@ -194,7 +194,11 @@ def clipboard_monitor(paused_flag):
                 text = get_clipboard_text()
                 if text and text != last_text:
                     last_text = text
-                    publish_line(text)
+                    # Only Japanese reaches the reader: the clipboard is shared
+                    # with everything else on the PC, and copied file paths /
+                    # git hashes / URLs used to end up as reader lines.
+                    if ocr._has_japanese(text):
+                        publish_line(text)
         time.sleep(0.3)
 
 

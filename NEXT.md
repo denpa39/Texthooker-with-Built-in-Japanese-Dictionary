@@ -17,10 +17,12 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 
 OCR fallback mode (`ocr.py`): drag-select screen region, GDI capture, Windows
 OCR, typewriter-animation stability gate, region persisted. manga-ocr was tried
-as the default engine and REMOVED: it hallucinates full Japanese sentences from
-no-text frames (generative model, never returns empty). Don't re-enable without
-gating it behind a cheap text-presence check (e.g. Windows OCR first, manga-ocr
-re-read only when Windows found text in the region).
+as the default engine and removed for hallucinating full Japanese sentences
+from no-text frames (generative model, never returns empty) — then re-enabled
+(2026-07-10) as `HybridOcr`: Windows OCR runs first as a cheap text-presence
+gate, manga-ocr reads the frame only when Windows saw Japanese there. Clipboard
+source now also drops non-Japanese text (copied paths/hashes used to become
+reader lines).
 
 ## Done (2026-07-02 sweep, trimmed 07-03 per user feedback)
 

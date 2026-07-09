@@ -53,11 +53,12 @@ Some engines defeat every hook. Plan B, built in:
    remembered across restarts.
 
 Recognition uses Windows' built-in Japanese OCR (needs the Japanese language
-pack: Settings → Time & Language → Language). manga-ocr support exists in the
-code but is currently disabled: being a generative model, it *hallucinates*
-plausible Japanese from frames without clear text (background art, cursors)
-instead of returning nothing — unusable as a polling engine until it's gated
-behind a text-presence check.
+pack: Settings → Time & Language → Language). If [manga-ocr](https://github.com/kha-white/manga-ocr)
+is installed (`pip install manga-ocr`, ~400 MB with torch), it takes over the
+actual reading — far more accurate on game fonts — while Windows OCR stays on
+as a text-presence gate: manga-ocr is a generative model that *hallucinates*
+plausible Japanese from frames without text (background art, cursors), so a
+frame is only sent to it when Windows OCR independently saw Japanese there.
 
 **Tip:** click a word to pin its popup open; press **Esc** to close. Hover gives a quick peek.
 
