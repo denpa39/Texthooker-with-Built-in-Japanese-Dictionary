@@ -21,10 +21,14 @@ as the default engine and removed for hallucinating full Japanese sentences
 from no-text frames (generative model, never returns empty) — then re-enabled
 (2026-07-10) as `HybridOcr`: Windows OCR locates text (line/word bounding
 boxes, also the presence gate — no Japanese means frame skipped), manga-ocr
-reads tight per-line crops chunked ≤6:1 aspect at word boundaries. Whole-region
-frames make manga-ocr hallucinate even when real text is on screen (ViT squishes
-everything to 224x224) — the first gate-only attempt still hallucinated on a
-full-screen NVL game. Lines under 55% of the tallest are dropped as furigana.
+reads each line in one call: ≤6:1-aspect word-boundary chunks stacked vertically
+into a near-square canvas (multi-row manga-bubble shape = its training data, and
+the decoder gets whole-sentence context — isolated chunk reads swapped in
+plausible wrong chars, 海水→海２). Whole-region frames make manga-ocr hallucinate
+even when real text is on screen (ViT squishes everything to 224x224) — the
+first gate-only attempt still hallucinated on a full-screen NVL game; the whole
+frame in one canvas starves resolution and misreads too, so one canvas per line
+is the sweet spot. Lines under 55% of the tallest are dropped as furigana.
 Clipboard source now also drops non-Japanese text (copied paths/hashes used to
 become reader lines).
 

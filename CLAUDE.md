@@ -51,12 +51,14 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   SUBPROCESS — must not share a main thread with pywebview; frozen builds re-invoke the exe
   with `--pick-region`), ctypes GDI region screenshot → BMP. Engine = `HybridOcr` when
   manga-ocr is installed: Windows.Media.Ocr (persistent PowerShell worker) locates text —
-  per-line + per-word bounding boxes — and manga-ocr reads tight crops of each line, split
-  into ≤6:1-aspect chunks at word boundaries (its ViT resizes input to 224x224; whole
-  screenshots make it hallucinate, wide thin lines garble). Lines under 55% of the tallest
-  are dropped as furigana. Chunk reads are cached by crop pixel hash (LRU 512) — NVL screens
-  accumulate text, so an unchanged line costs nothing on the next frame (~0.8s per new line
-  vs ~4s cold). No Japanese from Windows = frame skipped — manga-ocr is
+  per-line + per-word bounding boxes — and manga-ocr reads each line in ONE call: the line
+  is split into ≤6:1-aspect chunks at word boundaries, chunks stacked vertically into a
+  near-square canvas (its ViT resizes input to 224x224 — whole screenshots hallucinate,
+  wide thin lines garble, and isolated small chunks lose sentence context and swap in
+  plausible wrong chars, 海水→海２; max 6 rows per canvas, more starves resolution).
+  Lines under 55% of the tallest are dropped as furigana. Line canvases are cached by
+  pixel hash (LRU 256) — NVL screens accumulate text, so an unchanged line costs nothing
+  (~0.4s per new line, ~1.2s cold frame). No Japanese from Windows = frame skipped — manga-ocr is
   generative, NEVER run it ungated on raw frames. Without manga-ocr installed: plain
   Windows OCR (WinRT types need
   explicit `[Type,Assembly,ContentType=WindowsRuntime]` activation lines — missing one fails

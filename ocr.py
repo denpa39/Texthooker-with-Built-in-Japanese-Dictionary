@@ -305,13 +305,19 @@ class HybridOcr:
     Japanese instead of reading — even when real text is on screen. And its
     ViT encoder resizes everything to 224x224, so a wide thin VN line gets
     squished into garble too. So: each Windows-OCR line containing Japanese
-    is split at Windows' word boxes into chunks no wider than ~4x the line
-    height, each chunk cropped tight and read by manga-ocr, reads
-    concatenated. No Japanese found by Windows = frame skipped (the
-    hallucination gate)."""
+    is split at Windows' word boxes into chunks no wider than ~6x the line
+    height, and the chunks are stacked VERTICALLY into one near-square
+    canvas that manga-ocr reads in a single call — a shape it was trained
+    on (multi-row manga bubbles), and one where its decoder sees the whole
+    sentence as context instead of isolated 6-glyph fragments (fragment
+    reads swap in plausible wrong chars: 海水 -> 海２). One line per call;
+    stuffing the whole frame into one canvas starves the 224x224 input of
+    resolution and misreads again. No Japanese found by Windows = frame
+    skipped (the hallucination gate)."""
 
     name = "manga-ocr"
-    _MAX_CROPS = 14   # bound per-frame latency (~0.35s per manga-ocr call on CPU)
+    _MAX_LINES = 8    # model calls per frame (~0.5s each on CPU)
+    _MAX_ROWS = 6     # rows per canvas; more starves the 224x224 resolution
 
     def __init__(self):
         self._gate = WindowsOcr()
@@ -348,30 +354,47 @@ class HybridOcr:
         img = Image.open(bmp_path).convert("RGB")
         out, model_calls = [], 0
         for l in lines:
-            parts = []
+            crops = []
             for x0, x1 in self._spans(l):
                 # Vertical pad helps full glyphs; horizontal pad must stay
                 # tiny or the crop grabs half the neighbour span's glyph,
                 # which manga-ocr reads as a stray 「 or ｉ.
                 vpad = max(6, l["h"] // 6)
-                box = (max(0, x0 - 2), max(0, l["y"] - vpad),
-                       min(img.width, x1 + 2), min(img.height, l["y"] + l["h"] + vpad))
-                crop = img.crop(box)
-                key = hashlib.md5(crop.tobytes()).digest()
+                crops.append(img.crop((max(0, x0 - 2), max(0, l["y"] - vpad),
+                                       min(img.width, x1 + 2),
+                                       min(img.height, l["y"] + l["h"] + vpad))))
+            parts = []
+            for i in range(0, len(crops), self._MAX_ROWS):
+                canvas = self._stack(Image, crops[i:i + self._MAX_ROWS])
+                key = hashlib.md5(canvas.tobytes()).digest()
                 text = self._cache.get(key)
                 if text is None:
-                    if model_calls >= self._MAX_CROPS:
+                    if model_calls >= self._MAX_LINES:
                         break
                     model_calls += 1
-                    text = self._m.recognize(crop)
+                    text = self._m.recognize(canvas)
                     self._cache[key] = text
-                    if len(self._cache) > 512:
+                    if len(self._cache) > 256:
                         self._cache.popitem(last=False)
                 else:
                     self._cache.move_to_end(key)
                 parts.append(text)
             out.append("".join(parts))
         return "\n".join(out)
+
+    @staticmethod
+    def _stack(Image, crops):
+        """Stack chunk crops of one text line into a single top-to-bottom
+        canvas, backgrounded with the first crop's corner pixel."""
+        gap = 8
+        w = max(c.width for c in crops) + 16
+        h = sum(c.height for c in crops) + gap * (len(crops) + 1)
+        canvas = Image.new("RGB", (w, h), crops[0].getpixel((2, 2)))
+        y = gap
+        for c in crops:
+            canvas.paste(c, (8, y))
+            y += c.height + gap
+        return canvas
 
     def close(self):
         self._gate.close()
