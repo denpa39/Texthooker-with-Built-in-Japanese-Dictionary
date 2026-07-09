@@ -28,7 +28,11 @@ plausible wrong chars, 海水→海２). Whole-region frames make manga-ocr hall
 even when real text is on screen (ViT squishes everything to 224x224) — the
 first gate-only attempt still hallucinated on a full-screen NVL game; the whole
 frame in one canvas starves resolution and misreads too, so one canvas per line
-is the sweet spot. Lines under 55% of the tallest are dropped as furigana.
+is the sweet spot. Spans tile the line contiguously (a Windows-missed word box
+must not leave a glyph uncovered) and every multi-chunk line is read twice with
+shifted seams — the decoder sometimes drops a glyph at a row seam (まもなく→
+もなく), the two reads then disagree and the Windows text picks the winner by
+similarity. Lines under 55% of the tallest are dropped as furigana.
 Clipboard source now also drops non-Japanese text (copied paths/hashes used to
 become reader lines).
 

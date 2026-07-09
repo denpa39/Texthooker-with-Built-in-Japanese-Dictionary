@@ -316,7 +316,7 @@ class HybridOcr:
     skipped (the hallucination gate)."""
 
     name = "manga-ocr"
-    _MAX_LINES = 8    # model calls per frame (~0.5s each on CPU)
+    _MAX_CALLS = 16   # model calls per frame (~0.5s each on CPU)
     _MAX_ROWS = 6     # rows per canvas; more starves the 224x224 resolution
 
     def __init__(self):
@@ -327,18 +327,26 @@ class HybridOcr:
         # model entirely — same pixels, same text, no accuracy risk.
         self._cache = collections.OrderedDict()
 
-    def _spans(self, line):
-        """Split one OCR line into x-spans at word-box boundaries, each span
-        at most ~6:1 aspect — past ~7:1 the 224x224 resize eats glyphs, and
-        narrower chunks mean more manga-ocr calls (~0.35s each on CPU)."""
+    def _spans(self, line, shrink_first=0):
+        """Contiguous x-spans tiling the WHOLE line bbox, split at midpoints
+        of gaps between word-box groups, each group at most ~6:1 aspect —
+        past ~7:1 the 224x224 resize eats glyphs. Contiguity matters: a
+        glyph whose word box Windows missed (fancy backgrounds) still lands
+        inside some crop. shrink_first narrows the first group so a second
+        read places its seams elsewhere (seam-error voting)."""
         max_w = max(6 * line["h"], 200)
-        spans = []
-        for w in sorted(line.get("ws") or [], key=lambda w: w["x"]):
-            if spans and w["x"] + w["w"] - spans[-1][0] <= max_w:
-                spans[-1][1] = max(spans[-1][1], w["x"] + w["w"])
-            else:
-                spans.append([w["x"], w["x"] + w["w"]])
-        return spans or [[line["x"], line["x"] + line["w"]]]
+        x0, x1 = line["x"], line["x"] + line["w"]
+        words = sorted(line.get("ws") or [], key=lambda w: w["x"])
+        cuts, start, prev_end = [], x0 - shrink_first, None
+        for w in words:
+            if prev_end is not None and w["x"] + w["w"] - start > max_w:
+                cut = (prev_end + w["x"]) // 2
+                if x0 < cut < x1 and (not cuts or cut > cuts[-1]):
+                    cuts.append(cut)
+                start = w["x"]
+            prev_end = w["x"] + w["w"]
+        xs = [x0] + cuts + [x1]
+        return list(zip(xs, xs[1:]))
 
     def recognize(self, bmp_path):
         lines = [l for l in self._gate.recognize_lines(bmp_path)
@@ -352,35 +360,56 @@ class HybridOcr:
         lines = [l for l in lines if l["h"] >= 0.55 * tallest]
         from PIL import Image   # manga-ocr installed => PIL present
         img = Image.open(bmp_path).convert("RGB")
-        out, model_calls = [], 0
+        out = []
+        budget = [self._MAX_CALLS]
         for l in lines:
-            crops = []
-            for x0, x1 in self._spans(l):
-                # Vertical pad helps full glyphs; horizontal pad must stay
-                # tiny or the crop grabs half the neighbour span's glyph,
-                # which manga-ocr reads as a stray 「 or ｉ.
-                vpad = max(6, l["h"] // 6)
-                crops.append(img.crop((max(0, x0 - 2), max(0, l["y"] - vpad),
-                                       min(img.width, x1 + 2),
-                                       min(img.height, l["y"] + l["h"] + vpad))))
-            parts = []
-            for i in range(0, len(crops), self._MAX_ROWS):
-                canvas = self._stack(Image, crops[i:i + self._MAX_ROWS])
-                key = hashlib.md5(canvas.tobytes()).digest()
-                text = self._cache.get(key)
-                if text is None:
-                    if model_calls >= self._MAX_LINES:
-                        break
-                    model_calls += 1
-                    text = self._m.recognize(canvas)
-                    self._cache[key] = text
-                    if len(self._cache) > 256:
-                        self._cache.popitem(last=False)
-                else:
-                    self._cache.move_to_end(key)
-                parts.append(text)
-            out.append("".join(parts))
+            r1 = self._read_line(Image, img, l, 0, budget)
+            if len(self._spans(l)) == 1:      # no seams, nothing to vote on
+                out.append(r1 or "")
+                continue
+            # Second read with seams elsewhere. The decoder occasionally
+            # drops a glyph at a canvas row seam (まもなく -> もなく); the
+            # two reads then disagree, and Windows OCR — which garbles
+            # shapes but rarely misses that a char EXISTS — arbitrates.
+            r2 = self._read_line(Image, img, l, 3 * l["h"], budget)
+            if r1 is None or r2 is None or r1 == r2:
+                out.append(r1 or r2 or "")
+                continue
+            win = "".join(l["text"].split())
+            s1 = difflib.SequenceMatcher(None, r1, win).ratio()
+            s2 = difflib.SequenceMatcher(None, r2, win).ratio()
+            out.append(r1 if (s1, len(r1)) >= (s2, len(r2)) else r2)
         return "\n".join(out)
+
+    def _read_line(self, Image, img, l, shrink_first, budget):
+        """One manga-ocr read of one text line (chunks stacked into canvases).
+        Returns None if the per-frame model-call budget ran out."""
+        crops = []
+        for x0, x1 in self._spans(l, shrink_first):
+            # Vertical pad helps full glyphs; horizontal pad must stay
+            # tiny or the crop grabs half the neighbour span's glyph,
+            # which manga-ocr reads as a stray 「 or ｉ.
+            vpad = max(6, l["h"] // 6)
+            crops.append(img.crop((max(0, x0 - 2), max(0, l["y"] - vpad),
+                                   min(img.width, x1 + 2),
+                                   min(img.height, l["y"] + l["h"] + vpad))))
+        parts = []
+        for i in range(0, len(crops), self._MAX_ROWS):
+            canvas = self._stack(Image, crops[i:i + self._MAX_ROWS])
+            key = hashlib.md5(canvas.tobytes()).digest()
+            text = self._cache.get(key)
+            if text is None:
+                if budget[0] <= 0:
+                    return None
+                budget[0] -= 1
+                text = self._m.recognize(canvas)
+                self._cache[key] = text
+                if len(self._cache) > 256:
+                    self._cache.popitem(last=False)
+            else:
+                self._cache.move_to_end(key)
+            parts.append(text)
+        return "".join(parts)
 
     @staticmethod
     def _stack(Image, crops):
