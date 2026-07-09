@@ -60,9 +60,13 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   seams in different places; if the reads disagree (decoder drops a glyph at a row seam,
   まもなく→もなく) the Windows text arbitrates by similarity — Windows garbles shapes but
   rarely misses that a char exists. Lines under 55% of the tallest are dropped as
-  furigana. Canvases are cached by pixel hash (LRU 256) — NVL screens accumulate text,
-  so an unchanged line costs nothing (~0.7s per new line, ~2s cold frame, ~0.04s
-  unchanged). No Japanese from Windows = frame skipped — manga-ocr is
+  furigana. Lines sort by (y, x) — Windows line order is NOT guaranteed. Canvases are
+  cached by pixel hash (LRU 256) — NVL screens accumulate text, so an unchanged line
+  costs nothing (~0.7s per new line, ~2s cold frame, ~0.04s unchanged). A line reaches
+  publish_line only after two CONSECUTIVE loop passes read identical text — one-off
+  garbled reads from mid-transition frames (scene fades outlast the 8-sample pixel
+  settle) die unpublished; costs one 0.3s poll on static screens. No Japanese from
+  Windows = frame skipped — manga-ocr is
   generative, NEVER run it ungated on raw frames. Without manga-ocr installed: plain
   Windows OCR (WinRT types need
   explicit `[Type,Assembly,ContentType=WindowsRuntime]` activation lines — missing one fails

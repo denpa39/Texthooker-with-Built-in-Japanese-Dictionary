@@ -268,6 +268,9 @@ class WindowsOcr:
             return []
         for l in lines:
             l["text"] = base64.b64decode(l.pop("t")).decode("utf-8", "replace")
+        # Windows does NOT guarantee reading order; a transient frame once
+        # came back bottom line first and published a reordered duplicate.
+        lines.sort(key=lambda l: (l["y"], l["x"]))
         return lines
 
     def recognize(self, bmp_path):
@@ -376,9 +379,15 @@ class HybridOcr:
                 out.append(r1 or r2 or "")
                 continue
             win = "".join(l["text"].split())
-            s1 = difflib.SequenceMatcher(None, r1, win).ratio()
-            s2 = difflib.SequenceMatcher(None, r2, win).ratio()
-            out.append(r1 if (s1, len(r1)) >= (s2, len(r2)) else r2)
+
+            def score(r):
+                # Similarity to the Windows read first; ties broken by whose
+                # LENGTH matches Windows — a seam-doubled glyph (空空) makes
+                # the read longer than the char count Windows saw.
+                return (difflib.SequenceMatcher(None, r, win).ratio(),
+                        -abs(len(r) - len(win)))
+
+            out.append(max((r1, r2), key=score))
         return "\n".join(out)
 
     def _read_line(self, Image, img, l, shrink_first, budget):
@@ -543,6 +552,7 @@ class OcrSource:
             self.starting = False
             self.running = True
             last_hash = None
+            pending = None                         # text awaiting confirmation
             recent = collections.deque(maxlen=6)   # (key, raw) of recent publishes
             while not self._stop.is_set():
                 time.sleep(0.3)
@@ -554,31 +564,42 @@ class OcrSource:
                 except Exception:
                     continue
                 h = hashlib.md5(px).digest()
-                if h == last_hash:
+                if h == last_hash and pending is None:
                     continue
-                # Frame changed. Wait for the PIXELS to settle before spending an
-                # OCR — the typewriter animation is over when two samples 0.25s
-                # apart match. One OCR per line (not two) keeps latency ~0.6-0.9s
-                # and removes the double-read jitter that published near-duplicate
-                # lines. A permanent blinker (click-to-continue arrow) never
-                # settles, so give up after 4 samples and OCR anyway — the text
-                # dedupe below eats the repeats.
-                for _ in range(4):
-                    if self._stop.is_set():
-                        return
-                    time.sleep(0.25)
-                    try:
-                        px = capture_bmp(r["x"], r["y"], r["w"], r["h"], _TMP_BMP)
-                    except Exception:
-                        break
-                    h2 = hashlib.md5(px).digest()
-                    if h2 == h:
-                        break
-                    h = h2
-                last_hash = h
+                if h != last_hash:
+                    # Frame changed. Wait for the PIXELS to settle before
+                    # spending an OCR — the typewriter animation is over when
+                    # two samples 0.25s apart match. A permanent blinker
+                    # (click-to-continue arrow) never settles, so give up
+                    # after 8 samples and OCR anyway.
+                    for _ in range(8):
+                        if self._stop.is_set():
+                            return
+                        time.sleep(0.25)
+                        try:
+                            px = capture_bmp(r["x"], r["y"], r["w"], r["h"], _TMP_BMP)
+                        except Exception:
+                            break
+                        h2 = hashlib.md5(px).digest()
+                        if h2 == h:
+                            break
+                        h = h2
+                    last_hash = h
                 text = _clean(engine.recognize(_TMP_BMP))
                 if not text or not _has_japanese(text):
+                    pending = None
                     continue
+                # Confirmation gate: publish only after two consecutive passes
+                # read the SAME text. A mid-transition frame that slipped past
+                # the pixel settle (scene fades run longer than it waits)
+                # produces a one-off garbled read — reordered lines, seam
+                # doubles — that the next pass never reproduces, so it dies
+                # here. On a static screen the re-read is nearly free (the
+                # canvas cache answers) and costs one 0.3s poll of latency.
+                if text != pending:
+                    pending = text
+                    continue
+                pending = None
                 # Jitter guards against the last few published lines. A blinking
                 # cursor re-OCRs the same screen text repeatedly, each read a bit
                 # different (だ/た, cursor dot, and above all the 。 blinking in

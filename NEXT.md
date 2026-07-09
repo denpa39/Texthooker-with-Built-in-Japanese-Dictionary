@@ -32,7 +32,11 @@ is the sweet spot. Spans tile the line contiguously (a Windows-missed word box
 must not leave a glyph uncovered) and every multi-chunk line is read twice with
 shifted seams — the decoder sometimes drops a glyph at a row seam (まもなく→
 もなく), the two reads then disagree and the Windows text picks the winner by
-similarity. Lines under 55% of the tallest are dropped as furigana.
+similarity (ties: closest length to the Windows char count — seam doubles like
+空空 read long). Lines sort by (y, x); Windows line order isn't guaranteed and
+once flipped, publishing a reordered duplicate. Text publishes only after two
+consecutive loop passes agree — one-off garbage from mid-transition frames dies
+unconfirmed. Lines under 55% of the tallest are dropped as furigana.
 Clipboard source now also drops non-Japanese text (copied paths/hashes used to
 become reader lines).
 
