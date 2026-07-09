@@ -311,11 +311,15 @@ class HybridOcr:
     hallucination gate)."""
 
     name = "manga-ocr"
-    _MAX_CROPS = 14   # bound per-frame latency (~0.3s per crop on CPU)
+    _MAX_CROPS = 14   # bound per-frame latency (~0.35s per manga-ocr call on CPU)
 
     def __init__(self):
         self._gate = WindowsOcr()
         self._m = MangaOcr()
+        # crop-pixels -> text. A VN screen mostly repeats between frames (a
+        # new line appears, old ones don't move), so identical crops skip the
+        # model entirely — same pixels, same text, no accuracy risk.
+        self._cache = collections.OrderedDict()
 
     def _spans(self, line):
         """Split one OCR line into x-spans at word-box boundaries, each span
@@ -342,20 +346,30 @@ class HybridOcr:
         lines = [l for l in lines if l["h"] >= 0.55 * tallest]
         from PIL import Image   # manga-ocr installed => PIL present
         img = Image.open(bmp_path).convert("RGB")
-        out, crops = [], 0
+        out, model_calls = [], 0
         for l in lines:
             parts = []
             for x0, x1 in self._spans(l):
-                if crops >= self._MAX_CROPS:
-                    break
-                crops += 1
                 # Vertical pad helps full glyphs; horizontal pad must stay
                 # tiny or the crop grabs half the neighbour span's glyph,
                 # which manga-ocr reads as a stray 「 or ｉ.
                 vpad = max(6, l["h"] // 6)
                 box = (max(0, x0 - 2), max(0, l["y"] - vpad),
                        min(img.width, x1 + 2), min(img.height, l["y"] + l["h"] + vpad))
-                parts.append(self._m.recognize(img.crop(box)))
+                crop = img.crop(box)
+                key = hashlib.md5(crop.tobytes()).digest()
+                text = self._cache.get(key)
+                if text is None:
+                    if model_calls >= self._MAX_CROPS:
+                        break
+                    model_calls += 1
+                    text = self._m.recognize(crop)
+                    self._cache[key] = text
+                    if len(self._cache) > 512:
+                        self._cache.popitem(last=False)
+                else:
+                    self._cache.move_to_end(key)
+                parts.append(text)
             out.append("".join(parts))
         return "\n".join(out)
 
