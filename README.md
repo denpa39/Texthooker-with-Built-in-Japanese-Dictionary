@@ -55,10 +55,11 @@ Some engines defeat every hook. Plan B, built in:
 Recognition uses Windows' built-in Japanese OCR (needs the Japanese language
 pack: Settings → Time & Language → Language). If [manga-ocr](https://github.com/kha-white/manga-ocr)
 is installed (`pip install manga-ocr`, ~400 MB with torch), it takes over the
-actual reading — far more accurate on game fonts — while Windows OCR stays on
-as a text-presence gate: manga-ocr is a generative model that *hallucinates*
-plausible Japanese from frames without text (background art, cursors), so a
-frame is only sent to it when Windows OCR independently saw Japanese there.
+actual reading — far more accurate on game fonts. Windows OCR stays on to find
+*where* the text is: manga-ocr is a generative model that *hallucinates*
+plausible Japanese when fed whole screenshots (background art, multiple lines),
+so it only ever sees tight crops of the text lines Windows OCR located, and a
+frame with no Japanese found is skipped entirely.
 
 **Tip:** click a word to pin its popup open; press **Esc** to close. Hover gives a quick peek.
 

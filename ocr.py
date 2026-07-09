@@ -207,9 +207,25 @@ while ($true) {
     $dec = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
     $bmp = Await ($dec.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
     $res = Await ($engine.RecognizeAsync($bmp)) ([Windows.Media.Ocr.OcrResult])
-    $text = ($res.Lines | ForEach-Object { $_.Text }) -join "`n"
+    $lines = @()
+    foreach ($l in $res.Lines) {
+      $x1 = [double]::MaxValue; $y1 = [double]::MaxValue; $x2 = 0.0; $y2 = 0.0
+      $ws = @()
+      foreach ($w in $l.Words) {
+        $r = $w.BoundingRect
+        if ($r.X -lt $x1) { $x1 = $r.X }
+        if ($r.Y -lt $y1) { $y1 = $r.Y }
+        if ($r.X + $r.Width -gt $x2) { $x2 = $r.X + $r.Width }
+        if ($r.Y + $r.Height -gt $y2) { $y2 = $r.Y + $r.Height }
+        $ws += @{ x = [int]$r.X; w = [int]$r.Width }
+      }
+      $lines += @{ t = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($l.Text));
+                   x = [int]$x1; y = [int]$y1; w = [int]($x2 - $x1); h = [int]($y2 - $y1);
+                   ws = $ws }
+    }
     $stream.Dispose()
-    [Console]::Out.WriteLine([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($text)))
+    $json = ConvertTo-Json -InputObject @($lines) -Compress -Depth 5
+    [Console]::Out.WriteLine([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json)))
   } catch {
     [Console]::Out.WriteLine("")
   }
@@ -236,13 +252,26 @@ class WindowsOcr:
                 "Windows OCR has no Japanese support on this PC — install the Japanese "
                 "language pack (Settings > Language), or:  pip install manga-ocr")
 
-    def recognize(self, bmp_path):
+    def recognize_lines(self, bmp_path):
+        """OCR lines with their pixel bounding boxes (in the BMP's own,
+        already-upscaled coordinate space): [{"text","x","y","w","h"}, ...]."""
         if self._proc.poll() is not None:
             raise RuntimeError("Windows OCR worker died")
         self._proc.stdin.write(bmp_path.encode("utf-8") + b"\r\n")
         self._proc.stdin.flush()
         out = self._proc.stdout.readline().strip()
-        return base64.b64decode(out).decode("utf-8", "replace") if out else ""
+        if not out:
+            return []
+        try:
+            lines = json.loads(base64.b64decode(out).decode("utf-8", "replace"))
+        except ValueError:
+            return []
+        for l in lines:
+            l["text"] = base64.b64decode(l.pop("t")).decode("utf-8", "replace")
+        return lines
+
+    def recognize(self, bmp_path):
+        return "\n".join(l["text"] for l in self.recognize_lines(bmp_path))
 
     def close(self):
         try:
@@ -261,30 +290,74 @@ class MangaOcr:
         from manga_ocr import MangaOcr as _M   # heavy import (torch)
         self._m = _M()
 
-    def recognize(self, bmp_path):
-        return self._m(bmp_path)
+    def recognize(self, img_or_path):
+        return self._m(img_or_path)   # manga_ocr takes a path or a PIL Image
 
     def close(self):
         pass
 
 
 class HybridOcr:
-    """Windows OCR gates, manga-ocr reads. manga-ocr is a generative model: on a
-    frame with no text (gradient, animated background) it invents plausible
-    Japanese. Windows OCR never does that — so a frame only goes to manga-ocr
-    when Windows OCR independently saw Japanese on it. Garbled-but-present
-    Windows reads are fine: they only need to prove text exists."""
+    """Windows OCR finds WHERE the text is, manga-ocr reads WHAT it says.
+
+    manga-ocr is a generative single-text-block model: fed a whole region
+    screenshot (backgrounds, multiple lines, art) it invents plausible
+    Japanese instead of reading — even when real text is on screen. And its
+    ViT encoder resizes everything to 224x224, so a wide thin VN line gets
+    squished into garble too. So: each Windows-OCR line containing Japanese
+    is split at Windows' word boxes into chunks no wider than ~4x the line
+    height, each chunk cropped tight and read by manga-ocr, reads
+    concatenated. No Japanese found by Windows = frame skipped (the
+    hallucination gate)."""
 
     name = "manga-ocr"
+    _MAX_CROPS = 14   # bound per-frame latency (~0.3s per crop on CPU)
 
     def __init__(self):
         self._gate = WindowsOcr()
         self._m = MangaOcr()
 
+    def _spans(self, line):
+        """Split one OCR line into x-spans at word-box boundaries, each span
+        at most ~6:1 aspect — past ~7:1 the 224x224 resize eats glyphs, and
+        narrower chunks mean more manga-ocr calls (~0.35s each on CPU)."""
+        max_w = max(6 * line["h"], 200)
+        spans = []
+        for w in sorted(line.get("ws") or [], key=lambda w: w["x"]):
+            if spans and w["x"] + w["w"] - spans[-1][0] <= max_w:
+                spans[-1][1] = max(spans[-1][1], w["x"] + w["w"])
+            else:
+                spans.append([w["x"], w["x"] + w["w"]])
+        return spans or [[line["x"], line["x"] + line["w"]]]
+
     def recognize(self, bmp_path):
-        if not _has_japanese(self._gate.recognize(bmp_path)):
+        lines = [l for l in self._gate.recognize_lines(bmp_path)
+                 if _has_japanese(l["text"])]
+        if not lines:
             return ""
-        return self._m.recognize(bmp_path)
+        # Furigana ruby OCRs as its own tiny lines above the real ones — drop
+        # lines under 55% of the tallest so readings don't duplicate into the
+        # transcript. (Name labels are ~70% of dialogue size, they survive.)
+        tallest = max(l["h"] for l in lines)
+        lines = [l for l in lines if l["h"] >= 0.55 * tallest]
+        from PIL import Image   # manga-ocr installed => PIL present
+        img = Image.open(bmp_path).convert("RGB")
+        out, crops = [], 0
+        for l in lines:
+            parts = []
+            for x0, x1 in self._spans(l):
+                if crops >= self._MAX_CROPS:
+                    break
+                crops += 1
+                # Vertical pad helps full glyphs; horizontal pad must stay
+                # tiny or the crop grabs half the neighbour span's glyph,
+                # which manga-ocr reads as a stray 「 or ｉ.
+                vpad = max(6, l["h"] // 6)
+                box = (max(0, x0 - 2), max(0, l["y"] - vpad),
+                       min(img.width, x1 + 2), min(img.height, l["y"] + l["h"] + vpad))
+                parts.append(self._m.recognize(img.crop(box)))
+            out.append("".join(parts))
+        return "\n".join(out)
 
     def close(self):
         self._gate.close()

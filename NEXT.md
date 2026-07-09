@@ -19,10 +19,14 @@ OCR fallback mode (`ocr.py`): drag-select screen region, GDI capture, Windows
 OCR, typewriter-animation stability gate, region persisted. manga-ocr was tried
 as the default engine and removed for hallucinating full Japanese sentences
 from no-text frames (generative model, never returns empty) — then re-enabled
-(2026-07-10) as `HybridOcr`: Windows OCR runs first as a cheap text-presence
-gate, manga-ocr reads the frame only when Windows saw Japanese there. Clipboard
-source now also drops non-Japanese text (copied paths/hashes used to become
-reader lines).
+(2026-07-10) as `HybridOcr`: Windows OCR locates text (line/word bounding
+boxes, also the presence gate — no Japanese means frame skipped), manga-ocr
+reads tight per-line crops chunked ≤6:1 aspect at word boundaries. Whole-region
+frames make manga-ocr hallucinate even when real text is on screen (ViT squishes
+everything to 224x224) — the first gate-only attempt still hallucinated on a
+full-screen NVL game. Lines under 55% of the tallest are dropped as furigana.
+Clipboard source now also drops non-Japanese text (copied paths/hashes used to
+become reader lines).
 
 ## Done (2026-07-02 sweep, trimmed 07-03 per user feedback)
 
