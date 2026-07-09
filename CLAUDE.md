@@ -56,7 +56,10 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   screenshots hallucinate, wide thin lines garble, isolated small chunks lose sentence
   context and swap plausible wrong chars, 海水→海２; max 6 rows/canvas, more starves
   resolution). Spans tile the line CONTIGUOUSLY (gap midpoints) so a word box Windows
-  missed can't leave a glyph out of every crop. Multi-chunk lines are read TWICE with
+  missed can't leave a glyph out of every crop; every interior cut is then nudged to the
+  least-inky pixel column nearby (a cut through a glyph doubles it: 空→空空 — deterministic,
+  so the confirm gate can't catch it), and the outer span edges extend past the line bbox
+  (Windows routinely misses the trailing 。box). Multi-chunk lines are read TWICE with
   seams in different places; if the reads disagree (decoder drops a glyph at a row seam,
   まもなく→もなく) the Windows text arbitrates by similarity — Windows garbles shapes but
   rarely misses that a char exists. Lines under 55% of the tallest are dropped as

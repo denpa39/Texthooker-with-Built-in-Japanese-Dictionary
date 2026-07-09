@@ -390,11 +390,45 @@ class HybridOcr:
             out.append(max((r1, r2), key=score))
         return "\n".join(out)
 
+    def _refine_cuts(self, img, l, spans):
+        """Nudge every interior span boundary to the least-inky pixel column
+        nearby. A cut through a glyph puts half of it in BOTH canvas rows and
+        the decoder reads the char twice (空 -> 空空) — word-box gap midpoints
+        usually fall between glyphs, but misaligned boxes on decorated fonts
+        don't. Ink = per-column min-max range inside the line band; background
+        (even a gradient) is smooth top-to-bottom, glyph columns are not."""
+        if len(spans) < 2:
+            return spans
+        band = img.crop((0, max(0, l["y"] - 2),
+                         img.width, min(img.height, l["y"] + l["h"] + 2))).convert("L")
+        px = band.load()
+        rows = range(band.height)
+
+        def ink(x):
+            col = [px[x, yy] for yy in rows]
+            return max(col) - min(col)
+
+        reach = max(6, l["h"] // 2)
+        xs = [spans[0][0]]
+        for (a0, a1), (b0, b1) in zip(spans, spans[1:]):
+            lo = max(xs[-1] + 8, a1 - reach)
+            hi = min(b1 - 8, a1 + reach)
+            xs.append(min(range(lo, hi), key=ink) if lo < hi else a1)
+        xs.append(spans[-1][1])
+        return list(zip(xs, xs[1:]))
+
     def _read_line(self, Image, img, l, shrink_first, budget):
         """One manga-ocr read of one text line (chunks stacked into canvases).
         Returns None if the per-frame model-call budget ran out."""
+        spans = self._refine_cuts(img, l, self._spans(l, shrink_first))
+        # Windows routinely misses the trailing 。(and sometimes the first
+        # glyph's left edge) from its word boxes — a span edge hole the
+        # contiguous tiling can't cover. Extend outward into background;
+        # empty background adds nothing to the read.
+        spans[0] = (max(0, spans[0][0] - l["h"] // 3), spans[0][1])
+        spans[-1] = (spans[-1][0], min(img.width, spans[-1][1] + l["h"]))
         crops = []
-        for x0, x1 in self._spans(l, shrink_first):
+        for x0, x1 in spans:
             # Vertical pad helps full glyphs; horizontal pad must stay
             # tiny or the crop grabs half the neighbour span's glyph,
             # which manga-ocr reads as a stray 「 or ｉ.

@@ -33,7 +33,12 @@ must not leave a glyph uncovered) and every multi-chunk line is read twice with
 shifted seams — the decoder sometimes drops a glyph at a row seam (まもなく→
 もなく), the two reads then disagree and the Windows text picks the winner by
 similarity (ties: closest length to the Windows char count — seam doubles like
-空空 read long). Lines sort by (y, x); Windows line order isn't guaranteed and
+空空 read long). Interior cuts nudge to the least-inky pixel column nearby (a
+cut through a glyph halves it into both canvas rows and the decoder reads it
+twice — deterministically, so neither the dual-read vote nor the publish
+confirmation reliably catches it) and the outer span edges extend past the
+line bbox (Windows routinely misses the trailing 。box, an edge hole that
+contiguous tiling can't cover). Lines sort by (y, x); Windows line order isn't guaranteed and
 once flipped, publishing a reordered duplicate. Text publishes only after two
 consecutive loop passes agree — one-off garbage from mid-transition frames dies
 unconfirmed. Lines under 55% of the tallest are dropped as furigana.
