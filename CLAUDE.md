@@ -49,8 +49,10 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   exports/*.txt + opens Explorer — WebView2 can't blob-download).
 - **ocr.py** — OCR fallback for unhookable games: tkinter drag-a-box region picker (run as a
   SUBPROCESS — must not share a main thread with pywebview; frozen builds re-invoke the exe
-  with `--pick-region`), ctypes GDI region screenshot → BMP, engines = manga-ocr (optional
-  pip, best) else Windows.Media.Ocr via a persistent PowerShell worker (WinRT types need
+  with `--pick-region`), ctypes GDI region screenshot → BMP, engine = Windows.Media.Ocr via a
+  persistent PowerShell worker — manga-ocr is DISABLED in make_engine(): generative model,
+  hallucinates Japanese from no-text frames; don't re-enable without a text-presence gate
+  (WinRT types need
   explicit `[Type,Assembly,ContentType=WindowsRuntime]` activation lines — missing one fails
   before READY). Pixel-hash skips unchanged frames; a line publishes only after two identical
   consecutive reads (typewriter-animation filter). Region persists in `ocr_region.json`

@@ -52,10 +52,12 @@ Some engines defeat every hook. Plan B, built in:
    partial lines from typewriter animations are filtered out, and the area is
    remembered across restarts.
 
-Recognition uses **manga-ocr** if installed (`python -m pip install manga-ocr`,
-~400 MB — a model built specifically for Japanese game/manga text, strongly
-recommended for OCR mode), otherwise Windows' built-in Japanese OCR (needs the
-Japanese language pack: Settings → Time & Language → Language).
+Recognition uses Windows' built-in Japanese OCR (needs the Japanese language
+pack: Settings → Time & Language → Language). manga-ocr support exists in the
+code but is currently disabled: being a generative model, it *hallucinates*
+plausible Japanese from frames without clear text (background art, cursors)
+instead of returning nothing — unusable as a polling engine until it's gated
+behind a text-presence check.
 
 **Tip:** click a word to pin its popup open; press **Esc** to close. Hover gives a quick peek.
 
