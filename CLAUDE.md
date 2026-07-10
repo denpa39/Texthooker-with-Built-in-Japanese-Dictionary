@@ -98,7 +98,10 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   generative, NEVER run it ungated on raw frames. Without manga-ocr installed: plain
   Windows OCR (WinRT types need
   explicit `[Type,Assembly,ContentType=WindowsRuntime]` activation lines — missing one fails
-  before READY). Clipboard source drops non-Japanese text (copied paths/hashes). Pixel-hash skips unchanged frames; a line publishes only after two identical
+  before READY). Clipboard source drops non-Japanese text (copied paths/hashes). A re-read that extends
+  the published version at EITHER end republishes (late maru at the end; leading ……く、
+  Windows missed a frame ago at the start); manga-ocr dot-runs normalize to …… in _clean.
+  Pixel-hash skips unchanged frames; a line publishes only after two identical
   consecutive reads (typewriter-animation filter). Region persists in `ocr_region.json`
   (gitignored).
 - **hook.py** — drives `textractor/x64|x86/TextractorCLI.exe` as a child process (UTF-16-LE
