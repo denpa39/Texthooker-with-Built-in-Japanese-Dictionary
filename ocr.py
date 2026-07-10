@@ -233,6 +233,46 @@ while ($true) {
 """
 
 
+def _reading_order(lines):
+    """Put OCR lines in reading order and heal Windows' split lines.
+
+    Windows guarantees neither line order nor one-object-per-visual-line: it
+    splits a single sentence at an ellipsis into fragments with a couple px
+    of y jitter, and a naive (y, x) sort then reorders the sentence
+    (でかい……そして -> そして…でかい). Cluster into visual rows by
+    vertical-center proximity, order rows top-down and fragments
+    left-to-right, and MERGE same-row fragments whose gap is small enough to
+    be one sentence run — so the reader gets the sentence whole and
+    manga-ocr reads it with full context instead of split-off shards."""
+    rows = []
+    for l in sorted(lines, key=lambda q: q["y"]):
+        for row in rows:
+            r0 = row[-1]
+            if abs((l["y"] + l["h"] / 2) - (r0["y"] + r0["h"] / 2)) \
+                    < 0.6 * max(l["h"], r0["h"]):
+                row.append(l)
+                break
+        else:
+            rows.append([l])
+    out = []
+    for row in rows:
+        row.sort(key=lambda q: q["x"])
+        merged = [row[0]]
+        for l in row[1:]:
+            p = merged[-1]
+            if l["x"] - (p["x"] + p["w"]) <= 2 * max(p["h"], l["h"]):
+                bottom = max(p["y"] + p["h"], l["y"] + l["h"])
+                p["text"] += " " + l["text"]
+                p["w"] = l["x"] + l["w"] - p["x"]
+                p["y"] = min(p["y"], l["y"])
+                p["h"] = bottom - p["y"]
+                p["ws"] = (p.get("ws") or []) + (l.get("ws") or [])
+            else:
+                merged.append(l)
+        out.extend(merged)
+    return out
+
+
 class WindowsOcr:
     """Persistent PowerShell worker around Windows.Media.Ocr (ja). Spawning
     PowerShell per frame would cost ~300ms; one worker answers in ~50ms."""
@@ -268,10 +308,7 @@ class WindowsOcr:
             return []
         for l in lines:
             l["text"] = base64.b64decode(l.pop("t")).decode("utf-8", "replace")
-        # Windows does NOT guarantee reading order; a transient frame once
-        # came back bottom line first and published a reordered duplicate.
-        lines.sort(key=lambda l: (l["y"], l["x"]))
-        return lines
+        return _reading_order(lines)
 
     def recognize(self, bmp_path):
         return "\n".join(l["text"] for l in self.recognize_lines(bmp_path))

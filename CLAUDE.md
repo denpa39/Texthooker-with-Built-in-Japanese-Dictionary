@@ -71,7 +71,12 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   overrides — it garbles ブ→プ). Lines under 55% of the tallest are dropped as
   furigana. _has_japanese needs a THIRD of letters Japanese, not one char — a single
   glyph misread as kanji (ⅱ冊) used to publish fullwidth transcriptions of other
-  windows when the region was uncovered. Lines sort by (y, x) — Windows line order is NOT guaranteed. Canvases are
+  windows when the region was uncovered. Reading order is row-clustered, not (y, x)-sorted:
+  Windows splits one visual line into fragments with px-level y jitter (でかい……そして
+  split at the ellipsis came back scrambled), so fragments cluster into rows by
+  vertical-center proximity, rows top-down then left-to-right, and same-row fragments
+  within 2×height merge back into ONE line (single canvas, full sentence context).
+  Canvases are
   cached by pixel hash (LRU 256) — NVL screens accumulate text, so an unchanged line
   costs nothing (~0.7s per new line, ~2s cold frame). Frame-change detection is
   TEXT-level, not pixel-level: when the pixel hash changes, a cheap `peek` (Windows OCR
