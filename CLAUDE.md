@@ -69,10 +69,14 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   TEXT-level, not pixel-level: when the pixel hash changes, a cheap `peek` (Windows OCR
   only, ~0.15s) answers "did the TEXT change?" — blinking click-cursors and animated
   backgrounds churn pixels forever (the old pixel-settle loop stalled 2s on every
-  blink), text doesn't. New peek text must hold still for two consecutive 0.3s polls
-  before manga-ocr runs, which also kills mid-transition garbage (reads differently
-  every poll, never qualifies). Engines expose peek(): WindowsOcr = its read; bare
-  MangaOcr returns None → loop confirms on the expensive read instead. No Japanese from
+  blink), text doesn't. A new peek must REPEAT within the last 2 distinct peeks before
+  manga-ocr runs — not exact-consecutive: a blinking cursor makes Windows alternate two
+  readings (だから/たから) and consecutive matching starved such lines forever, while
+  mid-transition garbage peeks differently every poll and still never qualifies. An
+  unconfirmed peek forces re-peeking even when pixels freeze (post-fade lines died
+  pending). Engines expose peek(): WindowsOcr = its read; bare MangaOcr returns None →
+  loop confirms on the expensive read instead. /ocr state carries a live trace
+  (last peek/read/published) for debugging skipped lines. No Japanese from
   Windows = frame skipped — manga-ocr is
   generative, NEVER run it ungated on raw frames. Without manga-ocr installed: plain
   Windows OCR (WinRT types need

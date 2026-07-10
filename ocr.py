@@ -567,12 +567,14 @@ class OcrSource:
         self.starting = False
         self.engine_name = None
         self.error = None
+        self.trace = {}   # last peek/read/publish — live debugging via /ocr
         self._stop = threading.Event()
         self._thread = None
 
     def state(self):
         return {"running": self.running, "starting": self.starting,
-                "region": self.region, "engine": self.engine_name, "error": self.error}
+                "region": self.region, "engine": self.engine_name, "error": self.error,
+                "trace": self.trace}
 
     def set_region(self, region):
         self.region = region
@@ -603,8 +605,9 @@ class OcrSource:
             self.starting = False
             self.running = True
             last_hash = None
-            pending_sig = None    # peek signature awaiting a second identical look
-            handled_sig = None    # signature already read/published — skip re-reads
+            pending_text = None   # None-peek engines: text awaiting confirmation
+            seen = collections.deque(maxlen=2)     # unconfirmed peek signatures
+            handled = collections.deque(maxlen=4)  # signatures already read
             recent = collections.deque(maxlen=6)   # (key, raw) of recent publishes
             while not self._stop.is_set():
                 time.sleep(0.3)
@@ -616,43 +619,47 @@ class OcrSource:
                 except Exception:
                     continue
                 h = hashlib.md5(px).digest()
-                # A pending signature must get its confirming second peek even
-                # if the pixels froze right after the text appeared (scene
-                # comes back from a white fade and nothing blinks in-region) —
-                # skipping on hash alone left that text pending forever.
-                if h == last_hash and pending_sig is None:
+                # Unconfirmed text must get its confirming peek even if the
+                # pixels froze right after it appeared (scene back from a white
+                # fade, nothing blinking in-region) — skipping on hash alone
+                # left that text pending forever.
+                if h == last_hash and not seen and pending_text is None:
                     continue
                 last_hash = h
                 # Pixels changed — but is it TEXT? A blinking click-cursor or
                 # animated background churns the pixel hash forever (this used
                 # to stall a 2s settle loop and re-OCR every blink). The cheap
                 # peek (Windows OCR, ~0.1s) answers without touching the model.
-                # New text must hold still for two consecutive polls before the
-                # expensive read — mid-transition frames read differently every
-                # poll, so their garbage (reordered lines, half-faded glyphs)
-                # never qualifies.
+                # New text must peek the same twice among the last few polls
+                # before the expensive read: mid-transition frames peek
+                # differently EVERY poll and never qualify, while a blinking
+                # cursor that nudges Windows into alternating reads (だから/
+                # たから every other frame — exact-consecutive matching starved
+                # that line forever) converges in three polls.
                 sig = engine.peek(_TMP_BMP)
                 if sig is not None:
+                    self.trace["peek"] = sig
                     if not _has_japanese(sig):
-                        pending_sig = None
+                        seen.clear()
                         continue
-                    if sig == handled_sig:
-                        pending_sig = None
+                    if sig in handled:      # blink re-showing processed text
                         continue
-                    if sig != pending_sig:
-                        pending_sig = sig
+                    if sig not in seen:
+                        seen.append(sig)
                         continue
-                    pending_sig = None    # confirmed; idle again on static frames
+                    seen.clear()
                     text = _clean(engine.recognize(_TMP_BMP))
-                    handled_sig = sig     # processed — a blink must not re-read it
+                    handled.append(sig)
+                    self.trace["read"] = text
                 else:
                     # Engine without a cheap peek (bare manga-ocr, no Japanese
                     # language pack): confirm on the expensive read itself.
                     text = _clean(engine.recognize(_TMP_BMP))
-                    if not text or text != pending_sig:
-                        pending_sig = text
+                    self.trace["read"] = text
+                    if not text or text != pending_text:
+                        pending_text = text
                         continue
-                    pending_sig = None
+                    pending_text = None
                 if not text or not _has_japanese(text):
                     continue
                 # Jitter guards against the last few published lines. A blinking
@@ -677,6 +684,7 @@ class OcrSource:
                         continue
                 self._publish(text)
                 recent.append((key, text))
+                self.trace["published"] = text
         except Exception as e:
             self.error = str(e)
         finally:
