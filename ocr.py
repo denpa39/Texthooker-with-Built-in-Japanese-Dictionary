@@ -435,6 +435,7 @@ class HybridOcr:
                 continue
             if len(self._spans(l)) == 1:      # no seams, nothing to vote on
                 pick = self._repair(Image, img, l, r1 or "", win, budget)
+                pick = self._rescue(Image, img, l, pick, win, budget)
                 out.append(pick)
                 self.line_trace.append({"win": win, "r1": r1, "pick": pick})
                 continue
@@ -454,9 +455,41 @@ class HybridOcr:
                             -abs(len(r) - len(win)))
                 pick = max((r1, r2), key=score)
             pick = self._repair(Image, img, l, pick, win, budget)
+            pick = self._rescue(Image, img, l, pick, win, budget)
             out.append(pick)
             self.line_trace.append({"win": win, "r1": r1, "r2": r2, "pick": pick})
         return "\n".join(out)
+
+    def _rescue(self, Image, img, l, pick, win, budget):
+        """Last resort for whole-line manga whiffs. On a dark flash frame the
+        model read 「うぐっ！？」 as ．．． while Windows read it fine — a
+        single-span line gets no dual read, and repair only fixes 1-2 char
+        subs, so garbage sailed through (then died at the Japanese gate and
+        the line vanished). When the read barely resembles the Windows text,
+        retry with transformed canvases — 2x upscale, inverted (manga-ocr is
+        trained on black-on-white), both — and keep the best scorer. If every
+        attempt still whiffs, publish the Windows text itself: garbled beats
+        vanished."""
+        if not win or not _has_japanese(win):
+            return pick
+        def sim(r):
+            return difflib.SequenceMatcher(None, r or "", win).ratio()
+        best, best_s = pick, sim(pick)
+        if best_s >= 0.4:
+            return pick
+        from PIL import ImageOps
+        up = lambda c: c.resize((c.width * 2, c.height * 2), Image.LANCZOS)
+        inv = lambda c: ImageOps.invert(c.convert("L")).convert("RGB")
+        for t in (up, inv, lambda c: up(inv(c))):
+            r = self._read_line(Image, img, l, 0, budget, transform=t)
+            s = sim(r)
+            if s > best_s:
+                best, best_s = r, s
+            if best_s >= 0.7:
+                break
+        if best_s < 0.35:
+            return win        # every manga attempt failed; Windows saw real text
+        return best
 
     def _repair(self, Image, img, l, pick, win, budget):
         """Fix single-char substitutions the dual read can't catch (both
@@ -521,7 +554,7 @@ class HybridOcr:
         xs.append(spans[-1][1])
         return list(zip(xs, xs[1:]))
 
-    def _read_line(self, Image, img, l, shrink_first, budget):
+    def _read_line(self, Image, img, l, shrink_first, budget, transform=None):
         """One manga-ocr read of one text line (chunks stacked into canvases).
         Returns None if the per-frame model-call budget ran out."""
         spans = self._refine_cuts(img, l, self._spans(l, shrink_first))
@@ -543,6 +576,8 @@ class HybridOcr:
         parts = []
         for i in range(0, len(crops), self._MAX_ROWS):
             canvas = self._stack(Image, crops[i:i + self._MAX_ROWS])
+            if transform is not None:
+                canvas = transform(canvas)
             key = hashlib.md5(canvas.tobytes()).digest()
             text = self._cache.get(key)
             if text is None:

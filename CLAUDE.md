@@ -68,7 +68,10 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   single-char substitutions (both manga reads misread the same glyph: 空→望), a tight
   ~3-glyph crop around the spot gets a context-free re-read as the third opinion; the
   Windows char wins only when that local read confirms it (Windows alone never
-  overrides — it garbles ブ→プ). Lines under 55% of the tallest are dropped as
+  overrides — it garbles ブ→プ). When the read barely resembles the Windows text at all
+  (<0.4 similarity — dark flash frames made manga read 「うぐっ！？」 as ．．．), the line
+  retries with transformed canvases (2x upscale / inverted / both) and keeps the best;
+  if all whiff, the Windows text itself publishes — garbled beats vanished. Lines under 55% of the tallest are dropped as
   furigana. _has_japanese needs a THIRD of letters Japanese, not one char — a single
   glyph misread as kanji (ⅱ冊) used to publish fullwidth transcriptions of other
   windows when the region was uncovered. Reading order is row-clustered, not (y, x)-sorted:
