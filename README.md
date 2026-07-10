@@ -54,7 +54,9 @@ Some engines defeat every hook. Plan B, built in:
 
 Recognition uses Windows' built-in Japanese OCR (needs the Japanese language
 pack: Settings → Time & Language → Language). If [manga-ocr](https://github.com/kha-white/manga-ocr)
-is installed (`pip install manga-ocr`, ~400 MB with torch), it takes over the
+is installed (`pip install manga-ocr`, ~400 MB with torch; with an NVIDIA GPU,
+`pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cu128`
+afterwards makes reads ~2-3x faster), it takes over the
 actual reading — far more accurate on game fonts. Windows OCR stays on to find
 *where* the text is: manga-ocr is a generative model that *hallucinates*
 plausible Japanese when fed whole screenshots (background art, multiple lines),
