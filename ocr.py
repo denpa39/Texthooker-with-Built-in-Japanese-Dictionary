@@ -616,7 +616,11 @@ class OcrSource:
                 except Exception:
                     continue
                 h = hashlib.md5(px).digest()
-                if h == last_hash:
+                # A pending signature must get its confirming second peek even
+                # if the pixels froze right after the text appeared (scene
+                # comes back from a white fade and nothing blinks in-region) —
+                # skipping on hash alone left that text pending forever.
+                if h == last_hash and pending_sig is None:
                     continue
                 last_hash = h
                 # Pixels changed — but is it TEXT? A blinking click-cursor or
@@ -633,10 +637,12 @@ class OcrSource:
                         pending_sig = None
                         continue
                     if sig == handled_sig:
+                        pending_sig = None
                         continue
                     if sig != pending_sig:
                         pending_sig = sig
                         continue
+                    pending_sig = None    # confirmed; idle again on static frames
                     text = _clean(engine.recognize(_TMP_BMP))
                     handled_sig = sig     # processed — a blink must not re-read it
                 else:
@@ -646,6 +652,7 @@ class OcrSource:
                     if not text or text != pending_sig:
                         pending_sig = text
                         continue
+                    pending_sig = None
                 if not text or not _has_japanese(text):
                     continue
                 # Jitter guards against the last few published lines. A blinking
