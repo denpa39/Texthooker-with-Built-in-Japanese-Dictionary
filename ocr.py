@@ -488,7 +488,10 @@ class HybridOcr:
             if best_s >= 0.7:
                 break
         if best_s < 0.35:
-            return win        # every manga attempt failed; Windows saw real text
+            # Every manga attempt whiffed. Do NOT fall back to the Windows
+            # text: publishing its garble (罰いぞ品。 for セコいぞ……！) reads
+            # worse than a missing line. Return "" so nothing publishes.
+            return ""
         return best
 
     def _repair(self, Image, img, l, pick, win, budget):

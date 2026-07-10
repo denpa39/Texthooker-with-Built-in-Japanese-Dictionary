@@ -71,7 +71,7 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   overrides — it garbles ブ→プ). When the read barely resembles the Windows text at all
   (<0.4 similarity — dark flash frames made manga read 「うぐっ！？」 as ．．．), the line
   retries with transformed canvases (2x upscale / inverted / both) and keeps the best;
-  if all whiff, the Windows text itself publishes — garbled beats vanished. Lines under 55% of the tallest are dropped as
+  if all whiff, the line is SKIPPED — publishing the Windows garble read worse than a missing line. Lines under 55% of the tallest are dropped as
   furigana. _has_japanese needs a THIRD of letters Japanese, not one char — a single
   glyph misread as kanji (ⅱ冊) used to publish fullwidth transcriptions of other
   windows when the region was uncovered. Reading order is row-clustered, not (y, x)-sorted:
