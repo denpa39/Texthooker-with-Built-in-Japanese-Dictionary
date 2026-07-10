@@ -653,6 +653,8 @@ def _clean(text):
     OCR confusions: a lone dash before a kanji is a misread 一 (-番 -> 一番)."""
     text = text.replace("\n", "").replace(" ", "").replace("　", "")
     text = re.sub(r"[-−－](?=[一-鿿])", "一", text)
+    # manga-ocr renders VN ellipses (……) as runs of dots — map back.
+    text = re.sub(r"[.．]{3,}", "……", text)
     text = text.strip(_EDGE_JUNK).strip()
     # A short ASCII/dash tail after Japanese is almost always UI junk — a page
     # marker or a cursor glyph read as "-6". Drop it (then re-strip any mark it
@@ -807,12 +809,15 @@ class OcrSource:
                 # Reads of the same on-screen line (punctuation flicker, a kana
                 # misread, a blinking ◎ cursor) collapse via _same_line. Republish
                 # ONLY when this read extends the fullest version already shown —
-                # the maru/tail finally recognized — so the reader upgrades in
-                # place. Any equal-or-shorter re-read of that line is jitter.
+                # at the END (the maru finally recognized) or at the START
+                # (Windows finding the leading ……く、 it missed a frame ago) —
+                # so the reader upgrades. Equal-or-shorter re-reads are jitter.
                 same = [raw for k, raw in recent if _same_line(key, k)]
                 if same:
                     longest = max(same, key=len)
-                    if not (text.startswith(longest) and len(text) > len(longest)):
+                    grew = len(text) > len(longest) and (
+                        text.startswith(longest) or text.endswith(longest))
+                    if not grew:
                         continue
                 self._publish(text)
                 recent.append((key, text))
