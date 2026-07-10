@@ -65,10 +65,14 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   rarely misses that a char exists. Lines under 55% of the tallest are dropped as
   furigana. Lines sort by (y, x) — Windows line order is NOT guaranteed. Canvases are
   cached by pixel hash (LRU 256) — NVL screens accumulate text, so an unchanged line
-  costs nothing (~0.7s per new line, ~2s cold frame, ~0.04s unchanged). A line reaches
-  publish_line only after two CONSECUTIVE loop passes read identical text — one-off
-  garbled reads from mid-transition frames (scene fades outlast the 8-sample pixel
-  settle) die unpublished; costs one 0.3s poll on static screens. No Japanese from
+  costs nothing (~0.7s per new line, ~2s cold frame). Frame-change detection is
+  TEXT-level, not pixel-level: when the pixel hash changes, a cheap `peek` (Windows OCR
+  only, ~0.15s) answers "did the TEXT change?" — blinking click-cursors and animated
+  backgrounds churn pixels forever (the old pixel-settle loop stalled 2s on every
+  blink), text doesn't. New peek text must hold still for two consecutive 0.3s polls
+  before manga-ocr runs, which also kills mid-transition garbage (reads differently
+  every poll, never qualifies). Engines expose peek(): WindowsOcr = its read; bare
+  MangaOcr returns None → loop confirms on the expensive read instead. No Japanese from
   Windows = frame skipped — manga-ocr is
   generative, NEVER run it ungated on raw frames. Without manga-ocr installed: plain
   Windows OCR (WinRT types need

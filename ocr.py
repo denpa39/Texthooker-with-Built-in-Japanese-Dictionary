@@ -276,6 +276,9 @@ class WindowsOcr:
     def recognize(self, bmp_path):
         return "\n".join(l["text"] for l in self.recognize_lines(bmp_path))
 
+    # For WindowsOcr the full read IS cheap — peek and recognize coincide.
+    peek = recognize
+
     def close(self):
         try:
             self._proc.kill()
@@ -295,6 +298,9 @@ class MangaOcr:
 
     def recognize(self, img_or_path):
         return self._m(img_or_path)   # manga_ocr takes a path or a PIL Image
+
+    def peek(self, bmp_path):
+        return None                   # no cheap text detector without Windows OCR
 
     def close(self):
         pass
@@ -351,16 +357,27 @@ class HybridOcr:
         xs = [x0] + cuts + [x1]
         return list(zip(xs, xs[1:]))
 
-    def recognize(self, bmp_path):
+    def _lines(self, bmp_path):
         lines = [l for l in self._gate.recognize_lines(bmp_path)
                  if _has_japanese(l["text"])]
         if not lines:
-            return ""
+            return []
         # Furigana ruby OCRs as its own tiny lines above the real ones — drop
         # lines under 55% of the tallest so readings don't duplicate into the
         # transcript. (Name labels are ~70% of dialogue size, they survive.)
         tallest = max(l["h"] for l in lines)
-        lines = [l for l in lines if l["h"] >= 0.55 * tallest]
+        return [l for l in lines if l["h"] >= 0.55 * tallest]
+
+    def peek(self, bmp_path):
+        """Cheap (~0.1s) text signature of the frame — the Windows read, no
+        manga-ocr. The monitor loop uses it to tell 'text changed' apart from
+        'a cursor blinked': blinkers churn pixels every frame, text doesn't."""
+        return "\n".join("".join(l["text"].split()) for l in self._lines(bmp_path))
+
+    def recognize(self, bmp_path):
+        lines = self._lines(bmp_path)
+        if not lines:
+            return ""
         from PIL import Image   # manga-ocr installed => PIL present
         img = Image.open(bmp_path).convert("RGB")
         out = []
@@ -586,7 +603,8 @@ class OcrSource:
             self.starting = False
             self.running = True
             last_hash = None
-            pending = None                         # text awaiting confirmation
+            pending_sig = None    # peek signature awaiting a second identical look
+            handled_sig = None    # signature already read/published — skip re-reads
             recent = collections.deque(maxlen=6)   # (key, raw) of recent publishes
             while not self._stop.is_set():
                 time.sleep(0.3)
@@ -598,42 +616,38 @@ class OcrSource:
                 except Exception:
                     continue
                 h = hashlib.md5(px).digest()
-                if h == last_hash and pending is None:
+                if h == last_hash:
                     continue
-                if h != last_hash:
-                    # Frame changed. Wait for the PIXELS to settle before
-                    # spending an OCR — the typewriter animation is over when
-                    # two samples 0.25s apart match. A permanent blinker
-                    # (click-to-continue arrow) never settles, so give up
-                    # after 8 samples and OCR anyway.
-                    for _ in range(8):
-                        if self._stop.is_set():
-                            return
-                        time.sleep(0.25)
-                        try:
-                            px = capture_bmp(r["x"], r["y"], r["w"], r["h"], _TMP_BMP)
-                        except Exception:
-                            break
-                        h2 = hashlib.md5(px).digest()
-                        if h2 == h:
-                            break
-                        h = h2
-                    last_hash = h
-                text = _clean(engine.recognize(_TMP_BMP))
+                last_hash = h
+                # Pixels changed — but is it TEXT? A blinking click-cursor or
+                # animated background churns the pixel hash forever (this used
+                # to stall a 2s settle loop and re-OCR every blink). The cheap
+                # peek (Windows OCR, ~0.1s) answers without touching the model.
+                # New text must hold still for two consecutive polls before the
+                # expensive read — mid-transition frames read differently every
+                # poll, so their garbage (reordered lines, half-faded glyphs)
+                # never qualifies.
+                sig = engine.peek(_TMP_BMP)
+                if sig is not None:
+                    if not _has_japanese(sig):
+                        pending_sig = None
+                        continue
+                    if sig == handled_sig:
+                        continue
+                    if sig != pending_sig:
+                        pending_sig = sig
+                        continue
+                    text = _clean(engine.recognize(_TMP_BMP))
+                    handled_sig = sig     # processed — a blink must not re-read it
+                else:
+                    # Engine without a cheap peek (bare manga-ocr, no Japanese
+                    # language pack): confirm on the expensive read itself.
+                    text = _clean(engine.recognize(_TMP_BMP))
+                    if not text or text != pending_sig:
+                        pending_sig = text
+                        continue
                 if not text or not _has_japanese(text):
-                    pending = None
                     continue
-                # Confirmation gate: publish only after two consecutive passes
-                # read the SAME text. A mid-transition frame that slipped past
-                # the pixel settle (scene fades run longer than it waits)
-                # produces a one-off garbled read — reordered lines, seam
-                # doubles — that the next pass never reproduces, so it dies
-                # here. On a static screen the re-read is nearly free (the
-                # canvas cache answers) and costs one 0.3s poll of latency.
-                if text != pending:
-                    pending = text
-                    continue
-                pending = None
                 # Jitter guards against the last few published lines. A blinking
                 # cursor re-OCRs the same screen text repeatedly, each read a bit
                 # different (だ/た, cursor dot, and above all the 。 blinking in

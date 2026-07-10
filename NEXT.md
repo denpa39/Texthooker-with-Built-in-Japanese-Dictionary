@@ -38,7 +38,11 @@ cut through a glyph halves it into both canvas rows and the decoder reads it
 twice — deterministically, so neither the dual-read vote nor the publish
 confirmation reliably catches it) and the outer span edges extend past the
 line bbox (Windows routinely misses the trailing 。box, an edge hole that
-contiguous tiling can't cover). Lines sort by (y, x); Windows line order isn't guaranteed and
+contiguous tiling can't cover). Change detection is text-level: a cheap Windows
+peek on every pixel change tells cursor blinks (pixels churn, text same → skip)
+from real text (must hold two consecutive polls before manga-ocr runs) — this
+replaced the pixel-settle loop that stalled 2s on every blink and the
+read-twice publish confirmation. Lines sort by (y, x); Windows line order isn't guaranteed and
 once flipped, publishing a reordered duplicate. Text publishes only after two
 consecutive loop passes agree — one-off garbage from mid-transition frames dies
 unconfirmed. Lines under 55% of the tallest are dropped as furigana.
