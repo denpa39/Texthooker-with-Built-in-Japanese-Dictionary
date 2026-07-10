@@ -62,8 +62,14 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   (Windows routinely misses the trailing 。box). Multi-chunk lines are read TWICE with
   seams in different places; if the reads disagree (decoder drops a glyph at a row seam,
   まもなく→もなく) the Windows text arbitrates by similarity — Windows garbles shapes but
-  rarely misses that a char exists. Lines under 55% of the tallest are dropped as
-  furigana. Lines sort by (y, x) — Windows line order is NOT guaranteed. Canvases are
+  rarely misses that a char exists. When the picked read differs from Windows by 1-2
+  single-char substitutions (both manga reads misread the same glyph: 空→望), a tight
+  ~3-glyph crop around the spot gets a context-free re-read as the third opinion; the
+  Windows char wins only when that local read confirms it (Windows alone never
+  overrides — it garbles ブ→プ). Lines under 55% of the tallest are dropped as
+  furigana. _has_japanese needs a THIRD of letters Japanese, not one char — a single
+  glyph misread as kanji (ⅱ冊) used to publish fullwidth transcriptions of other
+  windows when the region was uncovered. Lines sort by (y, x) — Windows line order is NOT guaranteed. Canvases are
   cached by pixel hash (LRU 256) — NVL screens accumulate text, so an unchanged line
   costs nothing (~0.7s per new line, ~2s cold frame). Frame-change detection is
   TEXT-level, not pixel-level: when the pixel hash changes, a cheap `peek` (Windows OCR
@@ -76,7 +82,8 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   unconfirmed peek forces re-peeking even when pixels freeze (post-fade lines died
   pending). Engines expose peek(): WindowsOcr = its read; bare MangaOcr returns None →
   loop confirms on the expensive read instead. /ocr state carries a live trace
-  (last peek/read/published) for debugging skipped lines. No Japanese from
+  (last peek/read/published + per-line win/r1/r2/pick) for debugging skipped or
+  misread lines against the RUNNING app — check it before theorizing. No Japanese from
   Windows = frame skipped — manga-ocr is
   generative, NEVER run it ungated on raw frames. Without manga-ocr installed: plain
   Windows OCR (WinRT types need

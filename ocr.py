@@ -331,6 +331,7 @@ class HybridOcr:
     def __init__(self):
         self._gate = WindowsOcr()
         self._m = MangaOcr()
+        self.line_trace = []   # last frame's per-line (win, r1, r2, pick)
         # crop-pixels -> text. A VN screen mostly repeats between frames (a
         # new line appears, old ones don't move), so identical crops skip the
         # model entirely — same pixels, same text, no accuracy risk.
@@ -382,10 +383,14 @@ class HybridOcr:
         img = Image.open(bmp_path).convert("RGB")
         out = []
         budget = [self._MAX_CALLS]
+        self.line_trace = []
         for l in lines:
+            win = "".join(l["text"].split())
             r1 = self._read_line(Image, img, l, 0, budget)
             if len(self._spans(l)) == 1:      # no seams, nothing to vote on
-                out.append(r1 or "")
+                pick = self._repair(Image, img, l, r1 or "", win, budget)
+                out.append(pick)
+                self.line_trace.append({"win": win, "r1": r1, "pick": pick})
                 continue
             # Second read with seams elsewhere. The decoder occasionally
             # drops a glyph at a canvas row seam (まもなく -> もなく); the
@@ -393,19 +398,55 @@ class HybridOcr:
             # shapes but rarely misses that a char EXISTS — arbitrates.
             r2 = self._read_line(Image, img, l, 3 * l["h"], budget)
             if r1 is None or r2 is None or r1 == r2:
-                out.append(r1 or r2 or "")
-                continue
-            win = "".join(l["text"].split())
-
-            def score(r):
-                # Similarity to the Windows read first; ties broken by whose
-                # LENGTH matches Windows — a seam-doubled glyph (空空) makes
-                # the read longer than the char count Windows saw.
-                return (difflib.SequenceMatcher(None, r, win).ratio(),
-                        -abs(len(r) - len(win)))
-
-            out.append(max((r1, r2), key=score))
+                pick = r1 or r2 or ""
+            else:
+                def score(r):
+                    # Similarity to the Windows read first; ties broken by
+                    # whose LENGTH matches Windows — a seam-doubled glyph
+                    # (空空) makes the read longer than Windows' char count.
+                    return (difflib.SequenceMatcher(None, r, win).ratio(),
+                            -abs(len(r) - len(win)))
+                pick = max((r1, r2), key=score)
+            pick = self._repair(Image, img, l, pick, win, budget)
+            out.append(pick)
+            self.line_trace.append({"win": win, "r1": r1, "r2": r2, "pick": pick})
         return "\n".join(out)
+
+    def _repair(self, Image, img, l, pick, win, budget):
+        """Fix single-char substitutions the dual read can't catch (both
+        reads misread the same glyph the same way: 空 -> 望). Where pick and
+        the Windows text disagree on exactly one char, a tight ~3-glyph crop
+        around that spot gets its own context-free read as the third opinion;
+        the Windows char wins only when that local read backs it. Windows
+        alone must never override — it garbles shapes too (ブ -> プ)."""
+        if not pick or not win:
+            return pick
+        subs = [(i1, j1) for tag, i1, i2, j1, j2
+                in difflib.SequenceMatcher(None, pick, win).get_opcodes()
+                if tag == "replace" and i2 - i1 == 1 and j2 - j1 == 1
+                and _JP_RE.match(pick[i1]) and _JP_RE.match(win[j1])]
+        if not subs or len(subs) > 2:    # many diffs = Windows garble, not us
+            return pick
+        chars = list(pick)
+        for i1, j1 in subs:
+            if budget[0] <= 0:
+                break
+            xc = l["x"] + l["w"] * (j1 + 0.5) / max(len(win), 1)
+            vpad = max(6, l["h"] // 6)
+            crop = img.crop((max(0, int(xc - 1.7 * l["h"])), max(0, l["y"] - vpad),
+                             min(img.width, int(xc + 1.7 * l["h"])),
+                             min(img.height, l["y"] + l["h"] + vpad)))
+            key = hashlib.md5(crop.tobytes()).digest()
+            local = self._cache.get(key)
+            if local is None:
+                budget[0] -= 1
+                local = self._m.recognize(crop)
+                self._cache[key] = local
+                if len(self._cache) > 256:
+                    self._cache.popitem(last=False)
+            if win[j1] in local and chars[i1] not in local:
+                chars[i1] = win[j1]
+        return "".join(chars)
 
     def _refine_cuts(self, img, l, spans):
         """Nudge every interior span boundary to the least-inky pixel column
@@ -507,8 +548,17 @@ def make_engine():
 # --------------------------------------------------------------------------- #
 # The OCR text source
 # --------------------------------------------------------------------------- #
+_JP_RE = re.compile(r"[ぁ-ゖァ-ヶー一-鿿々]")   # real kana/kanji — NOT ・ or 。
+
+
 def _has_japanese(s):
-    return any("぀" <= ch <= "ヿ" or "一" <= ch <= "鿿" or ch == "々" for ch in s)
+    """True when the text is substantially Japanese — at least a third of its
+    letter-like chars. 'Any single Japanese char' let English UI text through
+    whenever ONE glyph misread as a kanji (ⅱ冊 → gate open → the reader got a
+    fullwidth transcription of another window)."""
+    jp = len(_JP_RE.findall(s))
+    letters = sum(1 for ch in s if ch.isalnum())
+    return jp > 0 and jp * 3 >= letters
 
 
 # Blinking click-to-continue cursors OCR as stray marks at the line's edges —
@@ -651,6 +701,7 @@ class OcrSource:
                     text = _clean(engine.recognize(_TMP_BMP))
                     handled.append(sig)
                     self.trace["read"] = text
+                    self.trace["lines"] = getattr(engine, "line_trace", None)
                 else:
                     # Engine without a cheap peek (bare manga-ocr, no Japanese
                     # language pack): confirm on the expensive read itself.
