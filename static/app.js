@@ -222,27 +222,41 @@ function buildSentence(text) {
   return div;
 }
 
+// The best single line obtainable from two reads of the same on-screen text
+// (mirror of ocr.py _merge_reads): containment picks the fuller read — covers
+// end-growth した→した。, front-growth 油断…→……く、油断…, shorter re-reads
+// and exact dups — and a substantial head/tail overlap (≥ half the shorter
+// read) splices reads that each missed a different end. null = different lines.
+function mergeReads(a, b) {
+  if (a.includes(b)) return a;
+  if (b.includes(a)) return b;
+  const lo = Math.max(4, Math.ceil(Math.min(a.length, b.length) / 2));
+  for (let k = Math.min(a.length, b.length); k >= lo; k--) {
+    if (a.endsWith(b.slice(0, k))) return a + b.slice(k);
+    if (b.endsWith(a.slice(0, k))) return b + a.slice(k);
+  }
+  return null;
+}
+
 function addLine(text) {
   text = (text || "").replace(/\r/g, "").trim();
   if (!text) return;
-  // The SSE stream replays the last line on every (re)connect; with the session
-  // restored from storage that replay would duplicate it. Consecutive identical
-  // lines can't come from the clipboard (the server dedupes), so skip them.
+  // Reconcile with the previous line: OCR re-reads the same on-screen text as
+  // it stabilises (typewriter, late maru, Windows finding the leading ……く、
+  // a frame late), the SSE stream replays the last line on reconnect, and NVL
+  // games append to the same screen. If the new text merges with the last
+  // line, swap the merged version in place instead of stacking a duplicate.
   const last = linesEl.lastElementChild;
-  if (last && last.dataset.raw === text) return;
-  // Punctuation-only flicker (OCR loses the sentence-ending 。 between frames):
-  // "…した。" then "…した" is the same line, not a new one — ignore the shorter
-  // re-read so it can't stack under the fuller version already shown.
-  const strip = s => s.replace(/[。．.｡、，,！？!?…‥・\s]+$/u, "");
-  if (last && strip(last.dataset.raw) === strip(text) && text.length <= last.dataset.raw.length)
-    return;
-  // The new line EXTENDS the previous one (OCR caught a typewriter animation
-  // mid-line, the maru finally landed, or an NVL game appends to the same
-  // screen): replace the partial instead of stacking. Stats count only the added.
   let statsText = text;
-  if (last && text.startsWith(last.dataset.raw)) {
-    statsText = text.slice(last.dataset.raw.length);
-    last.remove();
+  if (last) {
+    const merged = mergeReads(last.dataset.raw, text);
+    if (merged === last.dataset.raw) return;   // nothing new (dup / shorter re-read)
+    if (merged) {
+      // Stats count only the newly added chars (any slice of the right length).
+      statsText = merged.slice(last.dataset.raw.length);
+      text = merged;
+      last.remove();
+    }
   }
   hint.classList.add("gone");
 

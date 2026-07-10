@@ -674,6 +674,26 @@ def _norm(text):
     return text.rstrip(_TRAIL)
 
 
+def _merge_reads(a, b):
+    """The best single line obtainable from two reads of the same on-screen
+    text. Containment picks the fuller read (covers end-growth した→した。,
+    front-growth 油断…→……く、油断…, and shorter re-reads); a substantial
+    head/tail overlap — at least half the shorter read — splices reads that
+    each miss a different end into one superstring. None means the reads
+    differ some other way (kana-flip jitter): nothing upgradeable."""
+    if b in a:
+        return a
+    if a in b:
+        return b
+    lo = max(4, (min(len(a), len(b)) + 1) // 2)
+    for k in range(min(len(a), len(b)), lo - 1, -1):
+        if a.endswith(b[:k]):
+            return a + b[k:]
+        if b.endswith(a[:k]):
+            return b + a[k:]
+    return None
+
+
 def _same_line(a, b):
     """Two OCR reads of (probably) the same on-screen line? Poor OCR flips one
     kana per read (だ↔た, 葵 dropped…), which on a short line barely dents the
@@ -807,20 +827,23 @@ class OcrSource:
                 if not key:
                     continue
                 # Reads of the same on-screen line (punctuation flicker, a kana
-                # misread, a blinking ◎ cursor) collapse via _same_line. Republish
-                # ONLY when this read extends the fullest version already shown —
-                # at the END (the maru finally recognized) or at the START
-                # (Windows finding the leading ……く、 it missed a frame ago) —
-                # so the reader upgrades. Equal-or-shorter re-reads are jitter.
+                # misread, a blinking ◎ cursor) collapse via _same_line. A read
+                # that RECONCILES with the fullest version already shown — grows
+                # it at either end, or splices with it when each read missed a
+                # different end — publishes the merged superstring, which the
+                # reader swaps in place of the partial. Un-mergeable re-reads
+                # of the same line are jitter.
                 same = [raw for k, raw in recent if _same_line(key, k)]
                 if same:
                     longest = max(same, key=len)
-                    grew = len(text) > len(longest) and (
-                        text.startswith(longest) or text.endswith(longest))
-                    if not grew:
+                    merged = _merge_reads(longest, text)
+                    if merged is None or merged == longest:
                         continue
+                    text = merged
+                    recent = collections.deque(
+                        ((k, r) for k, r in recent if r != longest), maxlen=6)
                 self._publish(text)
-                recent.append((key, text))
+                recent.append((_norm(text), text))
                 self.trace["published"] = text
         except Exception as e:
             self.error = str(e)
