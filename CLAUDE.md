@@ -59,10 +59,12 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   missed can't leave a glyph out of every crop; every interior cut is then nudged to the
   least-inky pixel column nearby (a cut through a glyph doubles it: 空→空空 — deterministic,
   so the confirm gate can't catch it), and the outer span edges extend past the line bbox
-  (Windows routinely misses the trailing 。box). Multi-chunk lines are read TWICE with
-  seams in different places; if the reads disagree (decoder drops a glyph at a row seam,
-  まもなく→もなく) the Windows text arbitrates by similarity — Windows garbles shapes but
-  rarely misses that a char exists. When the picked read differs from Windows by 1-2
+  (Windows routinely misses the trailing 。box). If the first manga read matches the Windows
+  text EXACTLY, that's the answer — two independent engines agreeing beats any amount of
+  manga re-reading (1 model call, ~0.8s, the common case on clean fonts). Otherwise
+  multi-chunk lines are read TWICE with seams in different places; if the reads disagree
+  (decoder drops a glyph at a row seam, まもなく→もなく) the Windows text arbitrates by
+  similarity — Windows garbles shapes but rarely misses that a char exists. When the picked read differs from Windows by 1-2
   single-char substitutions (both manga reads misread the same glyph: 空→望), a tight
   ~3-glyph crop around the spot gets a context-free re-read as the third opinion; the
   Windows char wins only when that local read confirms it (Windows alone never

@@ -387,6 +387,15 @@ class HybridOcr:
         for l in lines:
             win = "".join(l["text"].split())
             r1 = self._read_line(Image, img, l, 0, budget)
+            if r1 is not None and r1 == win:
+                # Two INDEPENDENT engines produced the same string — stronger
+                # evidence than a second manga read (which shares the model's
+                # biases), so the extra read and the repair pass prove
+                # nothing. This is the common case on clean fonts: one model
+                # call per new line instead of 3-4.
+                out.append(r1)
+                self.line_trace.append({"win": win, "r1": r1, "pick": r1})
+                continue
             if len(self._spans(l)) == 1:      # no seams, nothing to vote on
                 pick = self._repair(Image, img, l, r1 or "", win, budget)
                 out.append(pick)
