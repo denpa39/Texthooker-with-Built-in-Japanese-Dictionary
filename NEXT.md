@@ -16,6 +16,17 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
   past the 300 cap live only in `logs/*.txt` and need a server-side grep route.
 - **QR code for the `--lan` URL** — kills type-an-IP-on-your-phone friction.
 
+## Done (2026-07-13, second pass)
+
+Test hardening to close the audit gaps: `/search` regression cases in
+test_ranking.py (bm25-cut and sense-tier bug classes), `test_ocr.py` pure-logic
+suite (reading order, _clean, _same_line, span tiling, PNG encoder, gates,
+coverage — no engines or screenshots needed), GitHub Actions CI running
+syntax + test_ocr + test_merge on every push (ranking self-skips without
+dict.sqlite). Still open by choice: OCR pipeline fixtures with real frames
+(needs captured game screenshots), threshold tuning (needs real-session /ocr
+trace data), server.py/app.js split (deferred until they hurt).
+
 ## Done (2026-07-13)
 
 English→Japanese reverse lookup (`/search`: FTS5 `gloss_fts` built by setup.py step

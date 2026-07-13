@@ -1,0 +1,22 @@
+# Runs everything that doesn't need dict.sqlite or a Windows screen:
+# syntax across both languages, the OCR pure-logic suite, and the py/js
+# merge-parity suite. Ranking tests self-skip without the dictionary.
+name: tests
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax (python + js)
+        run: |
+          python -m py_compile server.py ocr.py hook.py deinflect.py deinflect_data.py setup.py test_ranking.py test_merge.py test_ocr.py
+          node --check static/app.js
+          node --check static/settings.js
+      - name: OCR logic tests
+        run: python test_ocr.py
+      - name: Merge parity (python vs js)
+        run: python test_merge.py
+      - name: Ranking tests (self-skips without dict.sqlite)
+        run: python test_ranking.py

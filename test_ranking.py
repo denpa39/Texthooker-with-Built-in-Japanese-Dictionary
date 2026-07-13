@@ -63,6 +63,18 @@ CASES = [
     ("棒読み (rescue)",     "棒読みで言った",       "名詞",   "ボウ",  "棒",    "棒",    "word", "monotone"),
 ]
 
+# English reverse lookup (/search): (query, acceptable top-1 headwords, and a
+# word that must appear in the top 3). Encodes the bm25-preselection bug (刀 cut
+# from "sword" entirely) and the sense-tier bug (鋼's 3rd sense "sword" beating
+# 刀's 1st).
+EN_CASES = [
+    ("sword",              ("剣", "刀"),        "刀"),
+    ("eat",                ("食べる", "食う"),   "食べる"),
+    ("half-hearted reply", ("生返事",),          "生返事"),
+    ("cherry blossom",     ("桜",),              "桜"),
+    ("beautiful",          ("綺麗", "美しい"),   "美しい"),
+]
+
 # de-inflection coverage: each surface form must reach its dictionary base.
 DEINFL = [
     ("行かん", "行く"), ("知らず", "知る"), ("せず", "する"),
@@ -106,6 +118,24 @@ def main():
                 why.append(f"'{want_substr}' not in top result")
             print(f"FAIL  {label}: {head}【{e['r'][0]}】 [{c['kind']}] — {', '.join(why)}")
             failures += 1
+
+    # English reverse lookup (needs the gloss_fts table — setup.py adds it)
+    import sqlite3
+    has_fts = sqlite3.connect(server.DB_PATH).execute(
+        "SELECT 1 FROM sqlite_master WHERE name='gloss_fts'").fetchone()
+    if not has_fts:
+        print("SKIP  /search cases: no gloss_fts — run `python setup.py` to add it")
+    else:
+        for q, top1_ok, in_top3 in EN_CASES:
+            total += 1
+            r = server.search_english(q)
+            heads = [(c["entry"].get("k") or c["entry"].get("r") or ["?"])[0] for c in r]
+            if heads and heads[0] in top1_ok and in_top3 in heads[:3]:
+                print(f"PASS  /search {q}: {heads[:3]}")
+            else:
+                print(f"FAIL  /search {q}: got {heads[:3]}, want top1 in {top1_ok}, "
+                      f"{in_top3} in top 3")
+                failures += 1
 
     # de-inflection coverage
     import deinflect

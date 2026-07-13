@@ -21,12 +21,16 @@ python server.py                 # run (opens pywebview window; falls back to br
 python server.py --no-browser --port 6973   # headless, for testing
 python setup.py                  # one-time: downloads kuromoji, JMdict, JMnedict, KANJIDIC2,
                                  # Textractor; builds dict.sqlite (idempotent; --force rebuilds)
-python test_ranking.py           # lookup-ranking regression tests (needs dict.sqlite)
+python test_ranking.py           # ranking + /search regression tests (needs dict.sqlite)
 python test_merge.py             # _merge_reads (py) vs mergeReads (js) parity (needs node)
+python test_ocr.py               # OCR pure-logic units (reading order, spans, PNG, gates)
 python deinflect.py              # de-inflector self-test (41 cases)
 node --check static/app.js       # JS syntax check (no other lint/build step exists)
 build_exe.bat                    # PyInstaller one-file exes (app + setup)
 ```
+
+CI (`.github/workflows/tests.yml`) runs syntax + test_ocr + test_merge on every push;
+test_ranking self-skips there (no dict.sqlite) — run it locally before pushing ranking changes.
 
 UI verification: use the preview tools with `.claude/launch.json` server **"texthooker-verify"
 (port 6973)** — port 6972 ("texthooker") may be held by another session. Useful eval helpers:
