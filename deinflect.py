@@ -40,6 +40,14 @@ _SUPPLEMENT = [
     ("s", "である", "で", _M["v5"], _M["-て"], "〜てある (has been done)"),
     ("s", "ておる", "て", _M["v5"], _M["-て"], "〜ておる (humble progressive)"),
     ("s", "でおる", "で", _M["v5"], _M["-て"], "〜ておる (humble progressive)"),
+    # Spoken contractions Yomitan's table covers only in the て-variant (とる)
+    # or not at all: どる (飲んどる), てく/でく (食べてく = ていく dropped い),
+    # てらっしゃる (honorific ていらっしゃる, dropped い).
+    ("s", "どる", "で", _M["v5"], _M["-て"], "〜とる (progressive)"),
+    ("s", "てく", "て", _M["v5"], _M["-て"], "〜ていく (go on)"),
+    ("s", "でく", "で", _M["v5"], _M["-て"], "〜ていく (go on)"),
+    ("s", "てらっしゃる", "て", _M["v5"], _M["-て"], "〜ていらっしゃる (honorific)"),
+    ("s", "でらっしゃる", "で", _M["v5"], _M["-て"], "〜ていらっしゃる (honorific)"),
     ("s", "にくい", "", _M["adj-i"], 0, "〜にくい (hard to)"),
     ("s", "やすい", "", _M["adj-i"], 0, "〜やすい (easy to)"),
     ("s", "づらい", "", _M["adj-i"], 0, "〜づらい (hard to)"),

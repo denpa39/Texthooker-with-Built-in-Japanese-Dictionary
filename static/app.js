@@ -299,6 +299,10 @@ function addLine(text) {
 let pinned = false;
 
 async function fetchScan(text, pos, reading, base, surface) {
+  // /scan only ever looks at the first 32 chars — key and send exactly that,
+  // so the same word hit in different lines shares one cache entry (client
+  // FIFO and the server's lru_cache both).
+  text = text.slice(0, 32);
   const key = [pos || "", reading || "", base || "", surface || "", text].join("|");
   if (lookupCache.has(key)) return lookupCache.get(key);
   try {

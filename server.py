@@ -724,7 +724,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"term": term, "results": [], "error": str(e)}, 500)
         elif path == "/scan":
             qs = parse_qs(parsed.query)
-            text = (qs.get("text") or [""])[0]
+            # Normalize BEFORE scan() so its lru_cache keys on what it actually
+            # uses — otherwise the same 32-char window reached via different
+            # line tails fills the cache with duplicate entries.
+            text = (qs.get("text") or [""])[0].replace("\n", "")[:32]
             pos = (qs.get("pos") or [""])[0]
             reading = (qs.get("reading") or [""])[0]
             base = (qs.get("base") or [""])[0]
