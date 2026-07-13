@@ -22,6 +22,7 @@ python server.py --no-browser --port 6973   # headless, for testing
 python setup.py                  # one-time: downloads kuromoji, JMdict, JMnedict, KANJIDIC2,
                                  # Textractor; builds dict.sqlite (idempotent; --force rebuilds)
 python test_ranking.py           # lookup-ranking regression tests (needs dict.sqlite)
+python test_merge.py             # _merge_reads (py) vs mergeReads (js) parity (needs node)
 python deinflect.py              # de-inflector self-test (41 cases)
 node --check static/app.js       # JS syntax check (no other lint/build step exists)
 build_exe.bat                    # PyInstaller one-file exes (app + setup)
@@ -64,7 +65,15 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   manga re-reading (1 model call, ~0.8s, the common case on clean fonts). Otherwise
   multi-chunk lines are read TWICE with seams in different places; if the reads disagree
   (decoder drops a glyph at a row seam, まもなく→もなく) the Windows text arbitrates by
-  similarity — Windows garbles shapes but rarely misses that a char exists. When the picked read differs from Windows by 1-2
+  similarity — Windows garbles shapes but rarely misses that a char exists. Near-tie
+  similarity (within ~0.05, rounded to 1 decimal) falls to DICTIONARY COVERAGE
+  (`_dict_coverage`: greedy longest-match segmentation into ≥2-char dict.sqlite words,
+  de-inflection included) — a seam-dropped もなく stops segmenting where まもなく doesn't;
+  it's a semantic signal independent of both engines, so it works exactly where Windows
+  garbled the disputed spot. The same scorer sharpens `_same_line`: a read just below the
+  similarity threshold whose coverage GAP vs the other is ≥0.3 (gap, not absolute — garble
+  still hits stray words, 行つた covers via つた) is a garbled re-read, not a new line.
+  Coverage degrades to None without dict.sqlite — OCR must never require it. When the picked read differs from Windows by 1-2
   single-char substitutions (both manga reads misread the same glyph: 空→望), a tight
   ~3-glyph crop around the spot gets a context-free re-read as the third opinion; the
   Windows char wins only when that local read confirms it (Windows alone never
@@ -99,7 +108,8 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   Windows OCR (WinRT types need
   explicit `[Type,Assembly,ContentType=WindowsRuntime]` activation lines — missing one fails
   before READY). Clipboard source drops non-Japanese text (copied paths/hashes). Re-reads of the same on-screen line RECONCILE
-  via `_merge_reads` (ocr.py, mirrored as `mergeReads` in app.js): containment picks the
+  via `_merge_reads` (ocr.py, mirrored as `mergeReads` in app.js — `test_merge.py` locks
+  the two in parity, run it whenever either changes): containment picks the
   fuller read, a head/tail overlap ≥ half the shorter read splices reads that each missed
   a different end; the merged superstring republishes and the reader swaps it in place of
   the partial (no stacked near-duplicates). manga-ocr dot-runs normalize to …… in _clean.
@@ -122,7 +132,12 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
 
 "Longest *plausible* match, anchored on the tokenizer's segmentation." One sort key
 (`_sort_key`) decides everything; a longer match only beats the tokenizer's own token when the
-longer word is itself common (JMdict-common flag or VN rank ≤ 6600). A kana-written hover
+longer word is itself common (JMdict-common flag or VN rank ≤ 6600) — OR via the BOUNDARY
+RESCUE: a rare longer match keeps its length when its extension past the token contains
+kanji AND the match ends at a natural boundary (`_BOUNDARY_AFTER`: particles/copula/punct
+or line end) — 生返事 #16,624 hover 生 in 生返事だった. Kana extensions never rescue: the
+over-match trap class swallows particles (底荷「そこに」+ は passes the boundary test but
+not the kanji test). A kana-written hover
 prefers the usually-kana homograph (JMdict `uk` on the first sense — the "uk boost"), ranked
 below the reading-priority tiers so 豆「まめ」still beats the rare uk 忠実「まめ」. Frontend
 passes each hovered token's POS/reading/base/surface from kuromoji to drive it. Any change here

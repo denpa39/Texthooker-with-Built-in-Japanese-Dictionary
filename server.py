@@ -505,8 +505,16 @@ def _commonness(e):
     return (0, 0)            # no signal at all (names, very obscure entries)
 
 
-def _sort_key(c, tok_len, pos, reading_h, pref):
-    """The one ranking key for a candidate (lower sorts first)."""
+# Chars that legitimately FOLLOW a complete word: particles, copula, opening
+# quotes/brackets, punctuation. A match ending exactly before one of these sits
+# at a natural word boundary. Deliberately short — every char here widens the
+# boundary-rescue gate below.
+_BOUNDARY_AFTER = set("はがをにでとへもやのかだね、。！？…‥・「」『』（）　 ")
+
+
+def _sort_key(c, tok_len, pos, reading_h, pref, nxt=""):
+    """The one ranking key for a candidate (lower sorts first). `nxt` is the
+    char right after the matched prefix in the hovered text ("" at line end)."""
     e = c["entry"]
     is_name = c["kind"] == "name"
     is_verb = pos == "動詞"
@@ -537,7 +545,15 @@ def _sort_key(c, tok_len, pos, reading_h, pref):
     # words (一日中) and names keep their real length.
     eff_len = c["len"]
     if not is_name and c["len"] > tok_len and not _established(e):
-        eff_len = tok_len
+        # Boundary rescue: a rare-but-real compound the tokenizer split keeps
+        # its length when its EXTENSION past the token contains kanji AND the
+        # match ends at a natural boundary (生返事だ hover 生 → 生返事, VN rank
+        # #16,624, past the trust line yet plainly the word). Kana extensions
+        # never rescue: the over-match trap class swallows particles
+        # (底荷「そこに」+ は would qualify by boundary alone).
+        ext = (c.get("matched") or "")[tok_len:]
+        if not ((not nxt or nxt in _BOUNDARY_AFTER) and _has_kanji(ext)):
+            eff_len = tok_len
 
     common_lvl, common_mag = _commonness(e)
     return (
@@ -634,7 +650,9 @@ def scan(text, pos=None, reading=None, base=None, surface=None):
                         c["mr"] = rk
                         break
 
-    cands.sort(key=lambda c: _sort_key(c, tok_len, pos, reading_h, pref))
+    cands.sort(key=lambda c: _sort_key(
+        c, tok_len, pos, reading_h, pref,
+        text[c["len"]] if c["len"] < len(text) else ""))
     return cands[:12]
 
 

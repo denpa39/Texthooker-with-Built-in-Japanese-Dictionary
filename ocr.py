@@ -20,16 +20,20 @@ import base64
 import collections
 import ctypes
 import difflib
+import functools
 import hashlib
 import json
 import os
 import re
+import sqlite3
 import struct
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+
+import deinflect
 
 BASE_DIR = (os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, "frozen", False)
             else os.path.dirname(os.path.abspath(__file__)))
@@ -448,10 +452,19 @@ class HybridOcr:
                 pick = r1 or r2 or ""
             else:
                 def score(r):
-                    # Similarity to the Windows read first; ties broken by
-                    # whose LENGTH matches Windows — a seam-doubled glyph
-                    # (空空) makes the read longer than Windows' char count.
-                    return (difflib.SequenceMatcher(None, r, win).ratio(),
+                    # Similarity to the Windows read first — but COARSE
+                    # (1 decimal): when the reads sit within ~0.05 of each
+                    # other Windows can't really tell them apart, and there
+                    # dictionary coverage arbitrates instead (まもなく
+                    # segments into real words, the seam-dropped もなく
+                    # doesn't) — a semantic signal independent of both
+                    # engines, immune to Windows garbling the same spot.
+                    # Final tiebreak: whose LENGTH matches Windows — a
+                    # seam-doubled glyph (空空) reads longer than Windows'
+                    # char count.
+                    cov = _dict_coverage(r)
+                    return (round(difflib.SequenceMatcher(None, r, win).ratio(), 1),
+                            -1.0 if cov is None else cov,
                             -abs(len(r) - len(win)))
                 pick = max((r1, r2), key=score)
             pick = self._repair(Image, img, l, pick, win, budget)
@@ -645,6 +658,66 @@ def _has_japanese(s):
     return jp > 0 and jp * 3 >= letters
 
 
+# --------------------------------------------------------------------------- #
+# Dictionary-coverage scorer: dict.sqlite as a third, semantic arbiter.
+# A seam-dropped read (まもなく → もなく) stops segmenting into real words,
+# while the similarity-to-Windows arbiter goes blind exactly when Windows
+# itself garbled. Independent of both OCR engines.
+# --------------------------------------------------------------------------- #
+_COV_DB_PATH = os.path.join(BASE_DIR, "dict.sqlite")
+_cov_db = None          # lazy; stays None-able — OCR must work without the dict
+
+
+def _cov_conn():
+    global _cov_db
+    if _cov_db is None and os.path.isfile(_COV_DB_PATH):
+        try:
+            # Only the OCR monitor thread queries it, but be permissive anyway.
+            _cov_db = sqlite3.connect(_COV_DB_PATH, check_same_thread=False)
+        except sqlite3.Error:
+            pass
+    return _cov_db
+
+
+@functools.lru_cache(maxsize=4096)
+def _seg_hit(seg):
+    """`seg` is a dictionary word — directly, or via de-inflection (食べた)."""
+    db = _cov_conn()
+    if db is None:
+        return False
+    q = "SELECT 1 FROM terms WHERE term=? LIMIT 1"
+    if db.execute(q, (seg,)).fetchone():
+        return True
+    return any(form != seg and db.execute(q, (form,)).fetchone()
+               for form in deinflect.deinflect(seg))
+
+
+def _dict_coverage(text):
+    """Fraction of the Japanese chars in `text` that greedy longest-match
+    segments into dictionary words of 2+ chars (single kana are particles and
+    inflection tails — they match everything and prove nothing). None when
+    dict.sqlite is absent or the text has no Japanese."""
+    if _cov_conn() is None:
+        return None
+    covered = total = i = 0
+    n = len(text)
+    while i < n:
+        if not _JP_RE.match(text[i]):
+            i += 1
+            continue
+        for ln in range(min(8, n - i), 1, -1):
+            seg = text[i:i + ln]
+            if all(_JP_RE.match(ch) for ch in seg) and _seg_hit(seg):
+                covered += ln
+                total += ln
+                i += ln
+                break
+        else:
+            total += 1
+            i += 1
+    return covered / total if total else None
+
+
 # Blinking click-to-continue cursors OCR as stray marks at the line's edges —
 # strip them. Sentence enders (。！？…) are NOT in this set.
 _EDGE_JUNK = "・･•‥▼▽►◄▶◀◆◇■□●○◎◉⊙⊚★☆♦♢»«‹›"
@@ -708,7 +781,23 @@ def _same_line(a, b):
     if short and short in long:
         return True
     thr = 0.7 if len(long) <= 6 else 0.82
-    return difflib.SequenceMatcher(None, a, b).ratio() >= thr
+    ratio = difflib.SequenceMatcher(None, a, b).ratio()
+    if ratio >= thr:
+        return True
+    # Near-miss where one read is dictionary-clean and the other isn't: the
+    # poor one is a garbled re-read, not a new line — a couple of misread
+    # glyphs drag the ratio just under the threshold while also breaking the
+    # read's segmentation into real words. The evidence is the coverage GAP,
+    # not absolute levels (a garble can still hit stray words: 行つた covers
+    # via つた "vine"); two comparably-covered reads this far apart stay
+    # separate lines (だから/たから both segment fully, gap 0).
+    # ponytail: 0.12 band + 0.7/0.3 gap are eyeballed, tune via /ocr trace.
+    if ratio >= thr - 0.12:
+        ca, cb = _dict_coverage(a), _dict_coverage(b)
+        if ca is not None and cb is not None and \
+                max(ca, cb) >= 0.7 and max(ca, cb) - min(ca, cb) >= 0.3:
+            return True
+    return False
 
 
 class OcrSource:

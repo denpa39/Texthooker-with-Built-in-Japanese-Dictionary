@@ -56,6 +56,11 @@ CASES = [
     ("かける (uk)",         "かけてみた",           "動詞",   "カケ",  "かける", "かけ",  "word", "hang"),
     # -- uk guard: a JMdict-priority reading still beats a rare uk homograph ----
     ("まめ -> 豆 (guard)",  "まめを食べた",         "名詞",   "マメ",  "まめ",   "まめ",  "word", "legume"),
+    # -- boundary rescue: a rare-but-real compound the tokenizer split keeps its
+    #    length when it extends with kanji AND ends at a natural boundary.
+    #    (The over-match guard stays: そこには above — 底荷's extension is kana.)
+    ("生返事 (rescue)",     "生返事だった",         "名詞",   "ナマ",  "生",    "生",    "word", "half-hearted"),
+    ("棒読み (rescue)",     "棒読みで言った",       "名詞",   "ボウ",  "棒",    "棒",    "word", "monotone"),
 ]
 
 # de-inflection coverage: each surface form must reach its dictionary base.
