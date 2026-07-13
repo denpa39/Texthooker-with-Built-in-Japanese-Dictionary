@@ -16,6 +16,19 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
   past the 300 cap live only in `logs/*.txt` and need a server-side grep route.
 - **QR code for the `--lan` URL** — kills type-an-IP-on-your-phone friction.
 
+## Done (2026-07-14)
+
+Emulator hooking (PSP/PS2/Vita/Switch…) via Agent (0xDC00): `setup.py --agent`
+downloads the ~120 MB Electron app into `agent/` (gitignored), the Attach panel
+grew an "Emulators" section with a Launch Agent button (`/agent` state,
+`/agent/start` spawn). The user picks the game script + attaches inside Agent's
+own GUI (it's closed-source with no usable CLI — headless driving isn't
+possible); text reaches the reader through the existing :9001 websocket client
+(now status-tracked in `WS_CONNECTED`) and, before that connects, through
+Agent's clipboard copies (publish_line's consecutive-repeat drop dedupes the
+double feed). Note: Agent's WS server only listens once attached to a game —
+"running but not connected" is normal right after launch.
+
 ## Done (2026-07-13, second pass)
 
 Test hardening to close the audit gaps: `/search` regression cases in

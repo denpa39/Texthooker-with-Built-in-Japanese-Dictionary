@@ -958,6 +958,40 @@ ocrToggle.addEventListener("click", async () => {
   } catch (_) { refreshOcr(); }
 });
 
+/* Emulator hooking via Agent (bottom of the Attach panel) */
+const agentMsg = document.getElementById("agentMsg");
+const agentLaunch = document.getElementById("agentLaunch");
+
+function renderAgentState(st) {
+  agentLaunch.classList.toggle("hidden", !st.installed);
+  agentLaunch.classList.toggle("active", !!st.connected);
+  if (!st.installed) {
+    agentMsg.textContent = "Emulated games (PPSSPP, PCSX2, Vita3K…) hook through Agent. " +
+                           "Not downloaded yet — run:  python setup.py --agent";
+  } else if (st.connected) {
+    agentMsg.textContent = "Agent connected — attach to your emulator in Agent's window " +
+                           "and its text appears here.";
+  } else if (st.running) {
+    agentMsg.textContent = "Agent is open. In its window: update scripts, pick your game's " +
+                           "script, drag the crosshair onto the emulator, Attach.";
+  } else {
+    agentMsg.textContent = "Emulated games (PPSSPP, PCSX2, Vita3K, yuzu…) hook through " +
+                           "Agent — launch it, pick your game's script, attach.";
+  }
+}
+
+async function refreshAgent() {
+  try { renderAgentState(await (await fetch("/agent")).json()); } catch (_) {}
+}
+
+agentLaunch.addEventListener("click", async () => {
+  try {
+    const st = await jpost("/agent/start");
+    renderAgentState(st);
+    if (st.error) agentMsg.textContent = st.error;
+  } catch (_) { refreshAgent(); }
+});
+
 function toggleHookPanel(show) {
   const hidden = show === undefined ? !hookPanel.classList.contains("hidden") : !show;
   hookPanel.classList.toggle("hidden", hidden);
@@ -969,9 +1003,11 @@ function toggleHookPanel(show) {
       if (!st.attached) refreshProcesses();
     })();
     refreshOcr();
+    refreshAgent();
     hookPoll = setInterval(async () => {
       renderHookState(await (await fetch("/hooks")).json());
       refreshOcr();   // engine startup / errors surface without reopening the panel
+      refreshAgent(); // "connected" flips live once Agent's websocket answers
     }, 1000);
   }
 }

@@ -22,6 +22,7 @@ import re
 import socket
 import sqlite3
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -42,6 +43,8 @@ BASE_DIR = (os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, "fr
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 DB_PATH = os.path.join(BASE_DIR, "dict.sqlite")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
+AGENT_DIR = os.path.join(BASE_DIR, "agent")
+AGENT_EXE = os.path.join(AGENT_DIR, "agent.exe")
 
 # --------------------------------------------------------------------------- #
 # Windows clipboard reader (ctypes, no dependencies)
@@ -301,6 +304,9 @@ def _ws_extract_text(msg):
     return msg
 
 
+WS_CONNECTED = {}   # url -> bool, live view for the UI (/agent shows Agent's :9001)
+
+
 def websocket_monitor(url, paused_flag):
     """One reconnect-forever reader per websocket source. Quiet when the source
     isn't running; announces connects/drops so the user can tell it's live."""
@@ -310,6 +316,7 @@ def websocket_monitor(url, paused_flag):
             for msg in _ws_messages(url):
                 if not was_connected:
                     was_connected = True
+                    WS_CONNECTED[url] = True
                     print(f"WebSocket source connected: {url}")
                 if not paused_flag.is_set():
                     text = _ws_extract_text(msg)
@@ -323,7 +330,44 @@ def websocket_monitor(url, paused_flag):
         if was_connected:
             print(f"WebSocket source lost: {url} (retrying)")
             was_connected = False
+            WS_CONNECTED[url] = False
         time.sleep(5)
+
+
+# --------------------------------------------------------------------------- #
+# Emulator hooking via Agent (0xDC00/agent, downloaded by `setup.py --agent`).
+# Agent is a frida-based hooker with per-game scripts for PPSSPP / PCSX2 /
+# Vita3K / yuzu / Ryujinx…; it runs its own websocket server on :9001 which the
+# websocket_monitor above already consumes. We only launch the GUI — the user
+# picks the game's script and attaches inside Agent, text then flows here.
+# (Agent also copies lines to the clipboard; publish_line's consecutive-repeat
+# drop de-dupes that second feed.)
+# --------------------------------------------------------------------------- #
+_agent_proc = None
+
+
+def agent_state():
+    running = _agent_proc is not None and _agent_proc.poll() is None
+    return {"installed": os.path.isfile(AGENT_EXE),
+            "running": running,
+            # connected = Agent's ws server answered, even if the user launched
+            # Agent themselves instead of through us
+            "connected": any(ok and ":9001" in url for url, ok in WS_CONNECTED.items())}
+
+
+def agent_launch():
+    """Spawn the Agent GUI (idempotent). Returns an error string or None."""
+    global _agent_proc
+    if not os.path.isfile(AGENT_EXE):
+        return "Agent not downloaded — run:  python setup.py --agent"
+    if _agent_proc is not None and _agent_proc.poll() is None:
+        return None
+    try:
+        # cwd = its own folder so Agent's data/scripts cache lands there.
+        _agent_proc = subprocess.Popen([AGENT_EXE], cwd=AGENT_DIR)
+    except OSError as e:
+        return f"could not start Agent: {e}"
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -824,6 +868,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(hooker.state())
         elif path == "/ocr":
             self._send_json(ocr_source.state())
+        elif path == "/agent":
+            self._send_json(agent_state())
         elif path == "/snap":
             # Whole-game-window screenshot for Anki cards (base64 PNG). Finds
             # the window via the OCR region or the hooked pid; null otherwise.
@@ -876,6 +922,9 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/ocr/stop":
             ocr_source.stop()
             self._send_json(ocr_source.state())
+        elif parsed.path == "/agent/start":
+            err = agent_launch()
+            self._send_json({"error": err, **agent_state()}, 400 if err else 200)
         elif parsed.path == "/anki":
             # Proxy to AnkiConnect: the browser page can't call it directly
             # (AnkiConnect's CORS allowlist doesn't include this origin by default).

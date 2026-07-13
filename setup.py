@@ -55,6 +55,11 @@ KANJIDIC2_URL = "https://www.edrdg.org/kanjidic/kanjidic2.xml.gz"
 # Textractor (GPL-3.0) — its CLI is embedded so the app can hook games directly.
 TEXTRACTOR_API = "https://api.github.com/repos/Artikash/Textractor/releases/latest"
 TEXTRACTOR_DIR = os.path.join(BASE_DIR, "textractor")
+# Agent (0xDC00, frida-based) — hooks emulators (PPSSPP/PCSX2/Vita3K/yuzu…) with
+# per-game scripts it syncs itself; its websocket :9001 feeds the reader. Opt-in
+# (--agent): the Electron zip is ~120 MB.
+AGENT_API = "https://api.github.com/repos/0xDC00/agent/releases/latest"
+AGENT_DIR = os.path.join(BASE_DIR, "agent")
 UA = {"User-Agent": "texthooker-setup/1.0"}
 
 
@@ -576,6 +581,45 @@ def setup_textractor(force=False):
               f"clipboard capture still works\n")
 
 
+def setup_agent(force=False):
+    """Download Agent (0xDC00) into agent/ for emulator hooking (PS2/PSP/Vita…).
+    Opt-in via --agent; the app's Attach panel launches it and reads its
+    websocket. Agent syncs its own per-game scripts on first run."""
+    print("Agent (emulator hooking: PPSSPP / PCSX2 / Vita3K / yuzu…)")
+    if not force and os.path.isfile(os.path.join(AGENT_DIR, "agent.exe")):
+        print("  Agent already present (use --force to redownload)\n")
+        return
+    try:
+        info = json.loads(fetch_bytes(AGENT_API))
+        asset = next(a for a in info.get("assets", [])
+                     if "win32-x64" in a["name"] and a["name"].endswith(".zip"))
+        with tempfile.TemporaryDirectory() as tmp:
+            zpath = os.path.join(tmp, asset["name"])
+            print(f"  downloading {asset['name']} ({asset['size'] >> 20} MB)")
+            download(asset["browser_download_url"], zpath)
+            print("  extracting...")
+            with zipfile.ZipFile(zpath) as zf:
+                for m in zf.namelist():
+                    parts = m.replace("\\", "/").split("/")
+                    # strip the top-level "agent-vX-win32-x64/" folder if present
+                    if len(parts) > 1 and parts[0].lower().startswith("agent"):
+                        parts = parts[1:]
+                    if not parts or not parts[-1]:
+                        continue
+                    dest = os.path.join(AGENT_DIR, *parts)
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with zf.open(m) as src, open(dest, "wb") as out:
+                        out.write(src.read())
+        if not os.path.isfile(os.path.join(AGENT_DIR, "agent.exe")):
+            print("  warning: agent.exe not found after extract — zip layout "
+                  "changed? Check the agent/ folder.\n")
+            return
+        print("  Agent ready — use 'Launch Agent' in the app's Attach panel\n")
+    except Exception as e:
+        print(f"  Agent unavailable ({e}) — emulator hooking needs it; "
+              f"everything else still works\n")
+
+
 def setup_pywebview():
     """Best-effort install of pywebview for the standalone app window. The app
     falls back to the browser without it, so a failure here is not fatal."""
@@ -646,11 +690,17 @@ def main():
                     help="skip downloading Textractor (in-app game hooking)")
     ap.add_argument("--textractor", action="store_true",
                     help="only download Textractor (skip everything else)")
+    ap.add_argument("--agent", action="store_true",
+                    help="only download Agent (~120 MB) for emulator hooking "
+                         "(PPSSPP / PCSX2 / Vita3K / yuzu…)")
     args = ap.parse_args()
 
     print("Down the Rabbit Hole - setup\n" + "=" * 28)
     if args.textractor:
         setup_textractor(force=args.force)
+        return
+    if args.agent:
+        setup_agent(force=args.force)
         return
     if not args.skip_kuromoji:
         setup_kuromoji(force=args.force)

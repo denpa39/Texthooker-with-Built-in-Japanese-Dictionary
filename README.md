@@ -42,6 +42,23 @@ internally (`textractor/`, GPL-3.0). The old way still works too: run Textractor
 yourself with its **Copy to Clipboard** extension — the app watches the clipboard
 as a fallback.
 
+### Emulated games (PSP / PS2 / Vita / Switch…)
+
+Textractor can't hook inside an emulator — [Agent](https://github.com/0xDC00/agent)
+(frida-based) can, with per-game scripts for PPSSPP, PCSX2, Vita3K,
+yuzu/Ryujinx, Citra, RPCS3 and more from its
+[community scripts repo](https://github.com/0xDC00/scripts).
+
+1. `python setup.py --agent` — one-time, downloads Agent (~120 MB) into `agent/`.
+2. Open **Attach** → **Emulators** → **Launch Agent**.
+3. In Agent's window: update scripts (dropdown), pick the script matching your
+   game, drag the crosshair onto the emulator window, **Attach**.
+
+Hooked text flows into the reader automatically (Agent's websocket on :9001 is
+one of the app's default text sources, and Agent's clipboard copies are picked
+up even before that connects). No script for your game yet? Request one on the
+[scripts repo](https://github.com/0xDC00/scripts/issues), or fall back to OCR below.
+
 ### OCR mode (for games that won't hook)
 
 Some engines defeat every hook. Plan B, built in:
@@ -210,6 +227,7 @@ python server.py --browser       # open in the web browser instead of the app wi
 python server.py --no-browser    # serve only; open nothing
 python setup.py --textractor     # (re)download only the embedded Textractor
 python setup.py --no-textractor  # skip Textractor during setup
+python setup.py --agent          # download Agent (~120 MB) for emulator hooking
 ```
 
 ## Packaging (one-exe for non-Python users)
@@ -256,5 +274,7 @@ re-downloading the app.
   (`deinflect_data.py`; if you redistribute this project, GPL-3.0 terms apply to it).
 - Game hooking: **Textractor** — GPL-3.0 (downloaded to `textractor/`, driven as a
   separate process).
+- Emulator hooking: **Agent** by 0xDC00 — free closed-source binary (downloaded to
+  `agent/`, launched as a separate app; its community game scripts are MIT).
 - VN frequency: **jiten.moe** — CC BY-SA 4.0.
 - Kanji info: **KANJIDIC2** (EDRDG licence).

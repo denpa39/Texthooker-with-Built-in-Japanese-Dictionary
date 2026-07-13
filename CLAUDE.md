@@ -21,6 +21,7 @@ python server.py                 # run (opens pywebview window; falls back to br
 python server.py --no-browser --port 6973   # headless, for testing
 python setup.py                  # one-time: downloads kuromoji, JMdict, JMnedict, KANJIDIC2,
                                  # Textractor; builds dict.sqlite (idempotent; --force rebuilds)
+python setup.py --agent          # opt-in (~120 MB): Agent (0xDC00) into agent/ — emulator hooking
 python test_ranking.py           # ranking + /search regression tests (needs dict.sqlite)
 python test_merge.py             # _merge_reads (py) vs mergeReads (js) parity (needs node)
 python test_ocr.py               # OCR pure-logic units (reading order, spans, PNG, gates)
@@ -43,6 +44,7 @@ game ──embedded TextractorCLI (hook.py)──┐
 game ──Textractor → clipboard (ctypes)───┤→ publish_line() → logs/ + SSE /events → browser
 Textractor/Agent WS servers :6677/:9001 ─┤                            │ kuromoji tokenizes in-browser
 game window ──screen OCR (ocr.py)────────┘   dict.sqlite ←── /scan ──┘ hover popup
+emulator (PPSSPP/PCSX2/Vita3K/yuzu…) ── Agent GUI (agent/, launched via /agent/start) ──:9001↑
 ```
 
 - **server.py** — everything server-side: clipboard poller, websocket *client* (stdlib RFC 6455,
@@ -53,7 +55,13 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   bm25 preselection cut 刀 from "sword"; returns scan-shaped candidates; graceful error when the
   index is missing), `/kanji`, `/events` (SSE), `/state`, `/pause`, `/processes` `/hooks` `/attach`
   `/detach` `/hookpick` (game hooking), `/ocr` `/ocr/region` `/ocr/start` `/ocr/stop` (OCR
-  fallback), `/snap` (base64 PNG of the whole game window for Anki cards — window under the OCR
+  fallback), `/agent` `/agent/start` (emulator hooking: Agent by 0xDC00, downloaded by
+  `setup.py --agent` into agent/ [gitignored], spawned as a GUI child — the user picks the
+  game script + attaches in Agent's own window; text arrives via the existing :9001 WS
+  client, whose live status is `WS_CONNECTED`; Agent also copies lines to the clipboard,
+  publish_line's consecutive-repeat drop dedupes the double feed; Agent's WS server only
+  starts listening once attached, so "running but not connected" is the normal state
+  right after launch), `/snap` (base64 PNG of the whole game window for Anki cards — window under the OCR
   region's center, else the hooked pid's biggest visible window, else null; stdlib PNG encoder in
   ocr.py, GDI alpha must be forced to 255 or the PNG is transparent), `/anki` (proxy to
   AnkiConnect :8765 — CORS workaround), `/export` (writes exports/*.txt + opens Explorer —
