@@ -90,7 +90,7 @@ def fetch_bytes(url, headers=None):
 
 # --------------------------------------------------------------------------- #
 def setup_kuromoji(force=False):
-    print("[1/6] kuromoji tokenizer")
+    print("[1/7] kuromoji tokenizer")
     js_path = os.path.join(KUROMOJI_DIR, "kuromoji.js")
     if force or not os.path.isfile(js_path):
         download(f"{KUROMOJI_CDN}/build/kuromoji.js", js_path)
@@ -360,7 +360,7 @@ def build_db(jmdict_json_bytes, vn_freq=None):
 
 
 def setup_dictionary(common, force=False, freq_zip=None, innocent=False):
-    print("[2/6] JMdict dictionary + frequency")
+    print("[2/7] JMdict dictionary + frequency")
     if not force and os.path.isfile(DB_PATH):
         print("  dict.sqlite already present (use --force to rebuild)\n")
         return
@@ -383,6 +383,40 @@ def setup_dictionary(common, force=False, freq_zip=None, innocent=False):
         download(url, archive)
         js = extract_json(archive)
     build_db(js, vn_freq=vn_freq)
+
+
+def setup_gloss_fts(force=False):
+    """English -> Japanese reverse lookup: an FTS5 index over every entry's
+    glosses. Built FROM the finished entries table, so re-running setup.py
+    upgrades an existing dict.sqlite without redownloading anything."""
+    print("[3/7] English gloss search index")
+    if not os.path.isfile(DB_PATH):
+        print("  dict.sqlite missing — dictionary step must run first\n")
+        return
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    if not force and cur.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='gloss_fts'").fetchone():
+        print("  gloss_fts already present\n")
+        con.close()
+        return
+    try:
+        cur.execute("DROP TABLE IF EXISTS gloss_fts")
+        cur.execute("CREATE VIRTUAL TABLE gloss_fts USING fts5(gloss)")
+    except sqlite3.OperationalError:
+        print("  this Python's sqlite3 lacks FTS5 — English search stays off\n")
+        con.close()
+        return
+    rows = []
+    for eid, js in cur.execute("SELECT id, json FROM entries"):
+        e = json.loads(js)
+        gl = "; ".join(g for s in e.get("s", []) for g in s.get("gloss", []))
+        if gl:
+            rows.append((eid, gl))
+    cur.executemany("INSERT INTO gloss_fts(rowid, gloss) VALUES (?,?)", rows)
+    con.commit()
+    con.close()
+    print(f"  {len(rows):,} entries indexed\n")
 
 
 def find_jmnedict_asset():
@@ -448,7 +482,7 @@ def setup_kanji(force=False):
     """KANJIDIC2 per-kanji info: kanji(literal, json) with on/kun readings,
     meanings, stroke count, grade, JLPT level, frequency. Optional — the popup's
     kanji cards just don't appear without it."""
-    print("[4/6] kanji info (KANJIDIC2)")
+    print("[5/7] kanji info (KANJIDIC2)")
     if not os.path.isfile(DB_PATH):
         print("  build the dictionary first.\n")
         return
@@ -510,7 +544,7 @@ def setup_kanji(force=False):
 def setup_textractor(force=False):
     """Download the Textractor zip and extract it into textractor/ so the app can
     spawn TextractorCLI.exe itself (the in-app 'Attach' button)."""
-    print("[5/6] Textractor (embedded game hooking)")
+    print("[6/7] Textractor (embedded game hooking)")
     if not force and (os.path.isfile(os.path.join(TEXTRACTOR_DIR, "x64", "TextractorCLI.exe"))
                       or os.path.isfile(os.path.join(TEXTRACTOR_DIR, "x86", "TextractorCLI.exe"))):
         print("  Textractor already present (use --force to redownload)\n")
@@ -545,7 +579,7 @@ def setup_textractor(force=False):
 def setup_pywebview():
     """Best-effort install of pywebview for the standalone app window. The app
     falls back to the browser without it, so a failure here is not fatal."""
-    print("[6/6] app window (pywebview)")
+    print("[7/7] app window (pywebview)")
     try:
         import webview  # noqa: F401
         print("  pywebview already installed\n")
@@ -569,7 +603,7 @@ def setup_pywebview():
 
 
 def setup_names(force=False):
-    print("[3/6] JMnedict names")
+    print("[4/7] JMnedict names")
     if not os.path.isfile(DB_PATH):
         print("  build the dictionary first.\n")
         return
@@ -622,6 +656,7 @@ def main():
         setup_kuromoji(force=args.force)
     setup_dictionary(common=args.common, force=args.force, freq_zip=args.freq,
                      innocent=args.innocent)
+    setup_gloss_fts(force=args.force)
     if not args.no_names:
         setup_names(force=args.force)
     setup_kanji(force=args.force)

@@ -12,6 +12,21 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **Word audio** — 🔊 button, Yomitan-style JapanesePod101 URL. Needs internet; optional.
 - **OCR niceties** — multi-monitor region picker (current overlay covers the primary
   monitor), optional per-region preprocessing (upscale/threshold) for low-contrast text.
+- **Search the on-disk logs** — Ctrl+F covers the kept session lines; lines evicted
+  past the 300 cap live only in `logs/*.txt` and need a server-side grep route.
+- **QR code for the `--lan` URL** — kills type-an-IP-on-your-phone friction.
+
+## Done (2026-07-13)
+
+English→Japanese reverse lookup (`/search`: FTS5 `gloss_fts` built by setup.py step
+[3/7]; lookup box falls back to it for non-romaji ASCII or romaji with no Japanese
+hit; ranked first-sense boundary match > any-sense > mid-gloss, then commonness).
+Anki cards attach a whole-game-window screenshot (`/snap`: window under the OCR
+region else hooked pid, stdlib PNG encoder, ≤1280px). Ctrl+F find bar over session
+lines (kana-insensitive, newest-first cycling). Algorithm pass: OCR seam
+arbitration + `_same_line` jitter detection get a dictionary-coverage signal
+(`_dict_coverage`), ranking gained the boundary rescue for rare-but-real compounds
+(生返事), `test_merge.py` locks the py/js merge implementations in parity.
 
 ## Done (2026-07-06)
 

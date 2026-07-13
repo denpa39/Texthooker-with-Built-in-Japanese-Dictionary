@@ -113,11 +113,17 @@ with `--freq`.
 - **Hide names** — a popup toggle that filters JMnedict name clusters out of lookups
   (they reappear with one click, and a pure-name token still shows its names).
 - **Manual lookup box** — type or paste any word in the toolbar and press Enter; no
-  hooking needed. Romaji works too (tabemasu → たべます).
+  hooking needed. Romaji works too (tabemasu → たべます), and so does **English**:
+  "cherry blossom" searches the dictionary definitions and finds 桜 (full-text index
+  over every JMdict gloss, built by setup.py).
+- **Find in lines (Ctrl+F)** — search everything you've read this session
+  (kana-insensitive, さくら finds サクラ); Enter / Shift+Enter cycle matches.
 - **VN frequency chip** (№1,638) in the popup so you can tell at a glance whether a word
   is worth mining; green = common in visual novels.
 - **Anki export** — the ★ button on any entry adds a card (word, reading, meanings,
   source sentence) via [AnkiConnect](https://ankiweb.net/shared/info/2055492159).
+  When a game is attached or OCR is set up, a **screenshot of the whole game window**
+  rides along on the card — the full scene, not just the text box.
   Deck name is configurable (Settings → Study), the note type is created automatically,
   a one-time "Anki ✓ / Anki –" toolbar indicator shows whether Anki is reachable, and
   a duplicate card answers with "dup" instead of a generic error.
@@ -154,7 +160,7 @@ with `--freq`.
 | Control | What it does |
 |---|---|
 | status dot | Connection state at a glance — green = ready, orange = paused, red = disconnected (hover for the label) |
-| lookup box | Type a word + Enter (romaji OK) — dictionary popup without hooking |
+| lookup box | Type a word + Enter (romaji or English OK) — dictionary popup without hooking |
 | **Attach** | Hook a running game directly (embedded Textractor) — pick the process, then the text channel |
 | **Pause** / **Resume** | Stop/continue capture (clipboard + websocket) |
 | **Furigana** | Show readings above kanji |

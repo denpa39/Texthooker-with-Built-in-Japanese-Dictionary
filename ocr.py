@@ -32,6 +32,7 @@ import sys
 import tempfile
 import threading
 import time
+import zlib
 
 import deinflect
 
@@ -82,15 +83,18 @@ def save_region(r):
 # --------------------------------------------------------------------------- #
 # Screen capture (GDI): region -> 32-bit top-down BMP file + raw pixels
 # --------------------------------------------------------------------------- #
-def capture_bmp(x, y, w, h, path):
+def capture_bmp(x, y, w, h, path, scale=None):
     """Screenshot the region into a .bmp; returns the raw pixel bytes (for the
     cheap changed-frame hash). Windows only.
 
-    The capture is upscaled 2x (smooth HALFTONE interpolation): VN fonts are
-    small, and Windows OCR loses dakuten dots at that size (だ read as た).
-    Twice the glyph size recovers them. Very large regions stay 1:1."""
-    scale = 2 if w * h <= 1_200_000 else 1
-    sw, sh = w * scale, h * scale
+    By default the capture is upscaled 2x (smooth HALFTONE interpolation): VN
+    fonts are small, and Windows OCR loses dakuten dots at that size (だ read
+    as た). Twice the glyph size recovers them. Very large regions stay 1:1.
+    Pass `scale` explicitly (may be < 1) to override — window snapshots for
+    Anki cards downscale instead."""
+    if scale is None:
+        scale = 2 if w * h <= 1_200_000 else 1
+    sw, sh = int(w * scale), int(h * scale)
     hdc = user32.GetDC(None)
     mem = gdi32.CreateCompatibleDC(hdc)
     bmp = gdi32.CreateCompatibleBitmap(hdc, sw, sh)
@@ -117,6 +121,90 @@ def capture_bmp(x, y, w, h, path):
         f.write(bytes(bih))
         f.write(pixels)
     return pixels
+
+
+# --------------------------------------------------------------------------- #
+# Whole-window snapshot (for Anki cards): the full game scene, not just the
+# OCR text box. PNG is encoded with zlib by hand — no PIL requirement.
+# --------------------------------------------------------------------------- #
+def _window_rect_at(x, y):
+    """(x, y, w, h) of the top-level window under a desktop point, or None."""
+    user32.WindowFromPoint.restype = wintypes.HWND
+    hwnd = user32.WindowFromPoint(wintypes.POINT(x, y))
+    if not hwnd:
+        return None
+    root = user32.GetAncestor(hwnd, 2) or hwnd    # GA_ROOT
+    r = wintypes.RECT()
+    if not user32.GetWindowRect(root, ctypes.byref(r)):
+        return None
+    return (r.left, r.top, r.right - r.left, r.bottom - r.top)
+
+
+def _window_rect_for_pid(pid):
+    """Biggest visible top-level window of a process (the hooked game)."""
+    rects = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def cb(hwnd, _lp):
+        p = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(p))
+        if p.value == pid and user32.IsWindowVisible(hwnd):
+            r = wintypes.RECT()
+            if user32.GetWindowRect(hwnd, ctypes.byref(r)):
+                rects.append((r.left, r.top, r.right - r.left, r.bottom - r.top))
+        return True
+
+    user32.EnumWindows(cb, 0)
+    rects = [r for r in rects if r[2] >= 100 and r[3] >= 100]
+    return max(rects, key=lambda r: r[2] * r[3]) if rects else None
+
+
+def _encode_png(pixels_bgra, w, h):
+    """Minimal PNG (RGBA, filter 0) from GDI's 32-bit BGRA pixels."""
+    b = bytearray(pixels_bgra)
+    b[0::4], b[2::4] = b[2::4], b[0::4]      # BGRA -> RGBA
+    b[3::4] = b"\xff" * (len(b) // 4)        # GDI leaves alpha 0 = transparent
+    stride = w * 4
+    raw = b"".join(b"\x00" + bytes(b[y * stride:(y + 1) * stride]) for y in range(h))
+
+    def chunk(tag, data):
+        return (struct.pack(">I", len(data)) + tag + data +
+                struct.pack(">I", zlib.crc32(tag + data)))
+
+    return (b"\x89PNG\r\n\x1a\n" +
+            chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(bytes(raw), 6)) +
+            chunk(b"IEND", b""))
+
+
+_TMP_SNAP = os.path.join(tempfile.gettempdir(), "rabbithole_snap.bmp")
+# ^ NOT _TMP_BMP: /snap runs on an HTTP thread while the OCR loop keeps
+# rewriting _TMP_BMP — sharing the path would corrupt an in-flight OCR read.
+
+
+def snap_window_png(region=None, pid=None):
+    """PNG bytes of the whole game window: the window under the OCR region's
+    center, else the hooked process's biggest visible window. None when
+    neither source identifies a game (clipboard-only sessions)."""
+    if sys.platform != "win32":
+        return None
+    rect = None
+    if region:
+        rect = _window_rect_at(region["x"] + region["w"] // 2,
+                               region["y"] + region["h"] // 2)
+    if rect is None and pid:
+        rect = _window_rect_for_pid(pid)
+    if rect is None:
+        return None
+    x, y, w, h = rect
+    if w < 50 or h < 50:
+        return None
+    scale = min(1.0, 1280 / w)    # cards don't need 4K; keeps PNGs ~100-400 KB
+    try:
+        px = capture_bmp(x, y, w, h, _TMP_SNAP, scale=scale)
+    except Exception:
+        return None
+    return _encode_png(px, int(w * scale), int(h * scale))
 
 
 # --------------------------------------------------------------------------- #

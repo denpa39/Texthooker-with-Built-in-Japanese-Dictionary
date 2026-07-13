@@ -484,11 +484,21 @@ async function addToAnki(c, sentence, btn) {
     .map((s, i) => (i + 1) + ". " + s.gloss.join("; ")).join("<br>");
   try {
     await ensureAnki();
+    // Screenshot of the whole game window (OCR region's window, or the
+    // hooked game) rides along on the Sentence field. Best effort — a null
+    // /snap (clipboard-only session) just means a text-only card.
+    let picture;
+    try {
+      const j = await (await fetch("/snap")).json();
+      if (j.data) picture = [{ data: j.data, filename: "rabbit-hole-" + Date.now() + ".png",
+                               fields: ["Sentence"] }];
+    } catch (_) {}
     await anki("addNote", {
       note: {
         deckName: ankiDeck(), modelName: ANKI_MODEL,
         fields: { Word: word, Reading: reading, Meaning: meaning, Sentence: sentence || "" },
         options: { allowDuplicate: false },
+        ...(picture ? { picture } : {}),
       },
     });
     btn.textContent = "✓";
@@ -666,7 +676,7 @@ function renderPopupBody(cands, opts) {
   if (!shown.length) {
     const e = document.createElement("div");
     e.className = "empty";
-    e.textContent = `No entry for 「${opts.emptyLabel}」`;
+    e.textContent = opts.emptyText || `No entry for 「${opts.emptyLabel}」`;
     popup.appendChild(e);
   } else {
     shown.forEach(c => popup.appendChild(renderCandidate(c, opts.sentence)));
@@ -1031,14 +1041,12 @@ furiBtn.addEventListener("click", () => {
 furiBtn.classList.toggle("active", study.furi !== "off");
 if (study.furi !== "off") rebuildSentences();
 
-// Manual lookup box: type/paste a word (romaji works too — romajiToKana above),
-// Enter -> pinned popup.
-const lookupBox = document.getElementById("lookupBox");
-lookupBox.addEventListener("keydown", async e => {
-  if (e.key !== "Enter") return;
-  let text = lookupBox.value.trim();
-  if (!text) return;
-  if (/^[a-zA-Z'-]+$/.test(text)) text = romajiToKana(text);
+// Manual lookup box: type/paste a word (romaji works — romajiToKana above),
+// Enter -> pinned popup. English works too: ASCII that isn't valid romaji
+// (spaces, letters romajiToKana can't place) searches the JMdict glosses via
+// /search, and valid romaji that finds nothing in Japanese ("sake" typo'd,
+// "ninja gaiden") falls back to the same English search.
+async function scanJapanese(text) {
   // borrow the tokenizer's analysis of the first token for better ranking
   let pos = "", reading = "", base = "", surface = "";
   if (tokenizer) {
@@ -1050,15 +1058,114 @@ lookupBox.addEventListener("keydown", async e => {
       surface = t.surface_form;
     }
   }
-  const cands = await fetchScan(text, pos, reading, base, surface);
+  return fetchScan(text, pos, reading, base, surface);
+}
+
+async function searchEnglish(q) {
+  const key = "en|" + q.toLowerCase();
+  if (lookupCache.has(key)) return lookupCache.get(key);
+  let out;
+  try {
+    const j = await (await fetch("/search?q=" + encodeURIComponent(q))).json();
+    out = { cands: j.candidates || [], error: j.error || null };
+  } catch (_) {
+    out = { cands: [], error: null };
+  }
+  cacheLookup(key, out);
+  return out;
+}
+
+const lookupBox = document.getElementById("lookupBox");
+lookupBox.addEventListener("keydown", async e => {
+  if (e.key !== "Enter") return;
+  const text = lookupBox.value.trim();
+  if (!text) return;
+  let cands = null, label = text, emptyText = null;
+  if (/^[a-zA-Z'-]+$/.test(text)) {
+    const kana = romajiToKana(text);
+    if (!/[a-zA-Z]/.test(kana)) {           // valid romaji -> Japanese first
+      cands = await scanJapanese(kana);
+      label = kana;
+    }
+  }
+  if (!cands || !cands.length) {
+    if (/^[\x20-\x7E]+$/.test(text) && /[a-zA-Z]/.test(text)) {   // English
+      const r = await searchEnglish(text);
+      cands = r.cands;
+      label = text;
+      if (r.error) emptyText = r.error;
+    } else if (!cands) {                     // Japanese input, as before
+      cands = await scanJapanese(text);
+    }
+  }
   pinned = true;
   popup.classList.add("pinned");
   activeWord = null;
   const rerender = () => {
-    renderPopupBody(cands, { sentence: text, emptyLabel: text, rerender });
+    renderPopupBody(cands, { sentence: label, emptyLabel: label, emptyText, rerender });
     finishPopup(lookupBox, false);
   };
   rerender();
+});
+
+/* ---- find in lines (Ctrl+F) --------------------------------------------- */
+// Searches the raw text of every kept line (300 cap + whatever the session
+// restored). Kana-insensitive: query and lines both normalize katakana ->
+// hiragana, so さくら finds サクラ. Line-level highlight, Enter/Shift+Enter
+// cycle matches (starting from the newest).
+const findBar = document.getElementById("findBar");
+const findInput = document.getElementById("findInput");
+const findCountEl = document.getElementById("findCount");
+let findHits = [], findIdx = -1;
+
+function clearFind() {
+  document.querySelectorAll(".line.find-hit, .line.find-cur")
+    .forEach(l => l.classList.remove("find-hit", "find-cur"));
+  findHits = []; findIdx = -1;
+  findCountEl.textContent = "";
+}
+function jumpFind(dir, startIdx) {
+  if (!findHits.length) { findCountEl.textContent = "0"; return; }
+  if (findHits[findIdx]) findHits[findIdx].classList.remove("find-cur");
+  findIdx = startIdx !== undefined ? startIdx
+          : (findIdx + dir + findHits.length) % findHits.length;
+  const el = findHits[findIdx];
+  el.classList.add("find-cur");
+  el.scrollIntoView({ block: "center" });
+  findCountEl.textContent = (findIdx + 1) + "/" + findHits.length;
+}
+function runFind() {
+  clearFind();
+  const q = toHiragana(findInput.value.trim().toLowerCase());
+  if (!q) return;
+  findHits = [...linesEl.children]
+    .filter(l => toHiragana((l.dataset.raw || "").toLowerCase()).includes(q));
+  findHits.forEach(l => l.classList.add("find-hit"));
+  jumpFind(0, findHits.length - 1);   // newest match first — "an hour ago" is scrolled up from there
+}
+function openFind() {
+  findBar.classList.remove("hidden");
+  findInput.focus();
+  findInput.select();
+  if (findInput.value) runFind();
+}
+function closeFind() {
+  findBar.classList.add("hidden");
+  clearFind();
+}
+findInput.addEventListener("input", runFind);
+findInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); jumpFind(e.shiftKey ? -1 : 1); }
+  else if (e.key === "Escape") { e.stopPropagation(); closeFind(); }
+});
+document.getElementById("findPrev").addEventListener("click", () => jumpFind(-1));
+document.getElementById("findNext").addEventListener("click", () => jumpFind(1));
+document.getElementById("findClose").addEventListener("click", closeFind);
+document.addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+    e.preventDefault();   // replace the browser's find — it can't see dataset.raw across ruby/furigana
+    openFind();
+  }
 });
 
 // Remove only the most recent line (undo), and move the "latest" highlight back.

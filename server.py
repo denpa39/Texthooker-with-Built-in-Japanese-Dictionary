@@ -18,6 +18,7 @@ import functools
 import json
 import os
 import queue
+import re
 import socket
 import sqlite3
 import struct
@@ -656,6 +657,50 @@ def scan(text, pos=None, reading=None, base=None, surface=None):
     return cands[:12]
 
 
+@functools.lru_cache(maxsize=256)
+def search_english(q):
+    """English -> Japanese reverse lookup over the gloss_fts FTS5 index (built
+    by setup.py). Returns scan-shaped candidates so the popup renders them
+    unchanged, or None when the index doesn't exist yet."""
+    words = re.findall(r"[A-Za-z0-9']+", q or "")
+    if not words:
+        return []
+    db = get_db()
+    try:
+        # Each word quoted (kills FTS operator injection), implicit AND. Fetch
+        # ALL matches — bm25 preselection loves short rare entries and cut 刀
+        # from "sword" entirely; worst case ("go") is ~1k rows, cheap + cached.
+        match = " ".join('"%s"' % w for w in words)
+        rows = db.execute(
+            "SELECT e.json FROM gloss_fts f JOIN entries e ON e.id = f.rowid "
+            "WHERE gloss_fts MATCH ? LIMIT 2000", (match,)).fetchall()
+    except sqlite3.OperationalError:
+        return None
+    ql = " ".join(words).lower()
+    # The query matches a gloss when it's the whole gloss or a word-boundary
+    # prefix of it ("sword" ~ "sword (esp. Japanese)", NOT "swordfish");
+    # verb glosses drop their leading "to " so "eat" finds 食べる "to eat".
+    gm = re.compile(re.escape(ql) + r"($|[ ,;(])")
+
+    def hits(sense):
+        return any(gm.match(g.lower()[3:] if g.lower().startswith("to ") else g.lower())
+                   for g in sense.get("gloss") or [])
+
+    def key(e):
+        # The word's MAIN sense should mean the query: first-sense match beats
+        # any-sense match ("sword" -> 刀, not 鋼 whose 3rd sense is "sword")
+        # beats mid-gloss FTS hit ("bamboo sword"); then plain commonness.
+        senses = e.get("s") or []
+        tier = (0 if senses and hits(senses[0])
+                else 1 if any(hits(s) for s in senses[1:]) else 2)
+        lvl, mag = _commonness(e)
+        return (tier, -lvl, -mag)
+
+    entries = sorted((json.loads(js) for (js,) in rows), key=key)[:12]
+    return [{"len": 0, "matched": (e.get("k") or e.get("r") or [q])[0],
+             "reasons": [], "kind": "word", "entry": e} for e in entries]
+
+
 def kanji_info(ch):
     """KANJIDIC2 card for one kanji (None without the table / unknown char)."""
     if not ch:
@@ -754,6 +799,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"candidates": scan(text, pos, reading, base, surface)})
             except Exception as e:
                 self._send_json({"candidates": [], "error": str(e)}, 500)
+        elif path == "/search":
+            qs = parse_qs(parsed.query)
+            q = (qs.get("q") or [""])[0]
+            try:
+                cands = search_english(q)
+                if cands is None:
+                    self._send_json({"candidates": [], "error":
+                                     "no English index — run python setup.py once to add it"})
+                else:
+                    self._send_json({"candidates": cands})
+            except Exception as e:
+                self._send_json({"candidates": [], "error": str(e)}, 500)
         elif path == "/kanji":
             qs = parse_qs(parsed.query)
             ch = (qs.get("c") or [""])[0]
@@ -767,6 +824,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(hooker.state())
         elif path == "/ocr":
             self._send_json(ocr_source.state())
+        elif path == "/snap":
+            # Whole-game-window screenshot for Anki cards (base64 PNG). Finds
+            # the window via the OCR region or the hooked pid; null otherwise.
+            try:
+                png = ocr.snap_window_png(ocr_source.region, hooker.pid)
+                self._send_json(
+                    {"data": base64.b64encode(png).decode() if png else None})
+            except Exception:
+                self._send_json({"data": None})
         elif path == "/events":
             self._serve_events()
         elif path.startswith("/static/"):
