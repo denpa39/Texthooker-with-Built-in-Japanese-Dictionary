@@ -111,8 +111,18 @@ game window ──screen OCR (ocr.py)────────┘   dict.sqlite �
   unconfirmed peek forces re-peeking even when pixels freeze (post-fade lines died
   pending). Engines expose peek(): WindowsOcr = its read; bare MangaOcr returns None →
   loop confirms on the expensive read instead. /ocr state carries a live trace
-  (last peek/read/published + per-line win/r1/r2/pick) for debugging skipped or
-  misread lines against the RUNNING app — check it before theorizing. No Japanese from
+  (last peek/read/published + per-line win/r1/r2/pick/rescued) for debugging skipped or
+  misread lines against the RUNNING app — check it before theorizing. FIELD DEBUG DATA
+  persists on this PC (never in git — logs/ is gitignored): every OCR decision appends
+  to `logs/ocr-debug-YYYY-MM-DD.jsonl` (events: read [with per-line traces + saved-frame
+  name], publish, jitter_drop [text + what it deduped against], merge, gate_drop), and
+  frames the pipeline found suspicious — a whole-line whiff, a rescue, a seam
+  disagreement — are copied to `logs/ocr-frames/*.bmp` (post-upscale, the exact model
+  input; capped at 40, oldest pruned). PURPOSE: when the user reports a misread or a
+  missing line after a real session, READ THESE FILES FIRST — the jsonl says what was
+  decided and why, the matching frame reproduces it offline, and together they are
+  ready-made regression fixtures and the ground truth for tuning the eyeballed
+  thresholds (_same_line 0.12 band / 0.3 coverage gap, rescue 0.4/0.35). No Japanese from
   Windows = frame skipped — manga-ocr is
   generative, NEVER run it ungated on raw frames. Without manga-ocr installed: plain
   Windows OCR (WinRT types need

@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sqlite3
 import struct
 import subprocess
@@ -527,9 +528,11 @@ class HybridOcr:
                 continue
             if len(self._spans(l)) == 1:      # no seams, nothing to vote on
                 pick = self._repair(Image, img, l, r1 or "", win, budget)
+                pre = pick
                 pick = self._rescue(Image, img, l, pick, win, budget)
                 out.append(pick)
-                self.line_trace.append({"win": win, "r1": r1, "pick": pick})
+                self.line_trace.append({"win": win, "r1": r1, "pick": pick,
+                                        "rescued": pick != pre})
                 continue
             # Second read with seams elsewhere. The decoder occasionally
             # drops a glyph at a canvas row seam (まもなく -> もなく); the
@@ -556,9 +559,11 @@ class HybridOcr:
                             -abs(len(r) - len(win)))
                 pick = max((r1, r2), key=score)
             pick = self._repair(Image, img, l, pick, win, budget)
+            pre = pick
             pick = self._rescue(Image, img, l, pick, win, budget)
             out.append(pick)
-            self.line_trace.append({"win": win, "r1": r1, "r2": r2, "pick": pick})
+            self.line_trace.append({"win": win, "r1": r1, "r2": r2, "pick": pick,
+                                    "rescued": pick != pre})
         return "\n".join(out)
 
     def _rescue(self, Image, img, l, pick, win, budget):
@@ -909,6 +914,41 @@ class OcrSource:
                 "region": self.region, "engine": self.engine_name, "error": self.error,
                 "trace": self.trace}
 
+    # -- field debug data (logs/ is gitignored — stays on this PC) ---------- #
+    # Every OCR decision appends to logs/ocr-debug-YYYY-MM-DD.jsonl, and
+    # frames the pipeline found suspicious (a whiff, a seam disagreement, a
+    # rescue) are copied to logs/ocr-frames/ (capped). This is the raw
+    # material the tuned-by-eyeball thresholds and the fixture backlog need:
+    # after a real session, the jsonl says what was decided and why, and a
+    # saved frame + its trace line is a ready-made regression fixture.
+    def _debug(self, event, **kw):
+        try:
+            d = os.path.join(BASE_DIR, "logs")
+            os.makedirs(d, exist_ok=True)
+            rec = {"t": time.strftime("%H:%M:%S"), "e": event, **kw}
+            path = os.path.join(d, "ocr-debug-" + time.strftime("%Y-%m-%d") + ".jsonl")
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+    _MAX_FRAMES = 40
+
+    def _save_frame(self, why):
+        """Keep the exact BMP the pipeline just read (post-upscale, the real
+        model input) so a misread is reproducible offline. Oldest pruned."""
+        try:
+            d = os.path.join(BASE_DIR, "logs", "ocr-frames")
+            os.makedirs(d, exist_ok=True)
+            name = time.strftime("%Y%m%d-%H%M%S") + "-" + why + ".bmp"
+            shutil.copyfile(_TMP_BMP, os.path.join(d, name))
+            frames = sorted(os.listdir(d))
+            while len(frames) > self._MAX_FRAMES:
+                os.remove(os.path.join(d, frames.pop(0)))
+            return name
+        except OSError:
+            return None
+
     def set_region(self, region):
         self.region = region
         save_region(region)
@@ -984,7 +1024,22 @@ class OcrSource:
                     text = _clean(engine.recognize(_TMP_BMP))
                     handled.append(sig)
                     self.trace["read"] = text
-                    self.trace["lines"] = getattr(engine, "line_trace", None)
+                    lt = getattr(engine, "line_trace", None)
+                    self.trace["lines"] = lt
+                    # Suspicious frames become offline fixtures: a whole-line
+                    # whiff, a seam disagreement the arbiter had to settle,
+                    # or a rescue. Routine clean reads log text only.
+                    why = None
+                    for e in lt or []:
+                        if e.get("pick") == "":
+                            why = "whiff"; break
+                        if e.get("rescued"):
+                            why = "rescue"; break
+                        if "r2" in e and e.get("r1") != e.get("r2"):
+                            why = "seam"
+                    frame = self._save_frame(why) if why else None
+                    self._debug("read", text=text, lines=lt,
+                                **({"frame": frame} if frame else {}))
                 else:
                     # Engine without a cheap peek (bare manga-ocr, no Japanese
                     # language pack): confirm on the expensive read itself.
@@ -995,6 +1050,8 @@ class OcrSource:
                         continue
                     pending_text = None
                 if not text or not _has_japanese(text):
+                    if text:
+                        self._debug("gate_drop", text=text)
                     continue
                 # Jitter guards against the last few published lines. A blinking
                 # cursor re-OCRs the same screen text repeatedly, each read a bit
@@ -1018,13 +1075,16 @@ class OcrSource:
                     longest = max(same, key=len)
                     merged = _merge_reads(longest, text)
                     if merged is None or merged == longest:
+                        self._debug("jitter_drop", text=text, kept=longest)
                         continue
                     text = merged
                     recent = collections.deque(
                         ((k, r) for k, r in recent if r != longest), maxlen=6)
+                    self._debug("merge", merged=text, was=longest)
                 self._publish(text)
                 recent.append((_norm(text), text))
                 self.trace["published"] = text
+                self._debug("publish", text=text)
         except Exception as e:
             self.error = str(e)
         finally:
