@@ -604,17 +604,16 @@ def _sort_key(c, tok_len, pos, reading_h, pref, nxt=""):
     return (
         -eff_len,                          # 1. longest *plausible* match first
         1 if is_name else 0,               # 2. a real word beats a same-length name
-        0 if (pos_ok or read_ok) else 1,   # 3. tokenizer-confirmed candidate first
-        0 if pos_ok else 1,                # 4. part-of-speech agreement (其処 pronoun > 底 noun)
-        0 if read_ok else 1,               # 5. reading agreement (any reading)
-        0 if primary_read_ok else 1,       # 6. the hovered reading is the entry's primary one
-        0 if read_pri_ok else 1,           # 7. the matched reading carries JMdict priority
-        0 if pref_ok else 1,               # 8. known dominant kanji for a kana verb (居る > 射る)
-        0 if uk_ok else 1,                 # 9. usually-kana word for a kana hover (uk boost)
-        len(c["reasons"]),                 # 10. fewer de-inflection steps (exact > inflected)
-        -common_lvl, -common_mag,          # 11. more common (JMdict-common tier > raw VN rank)
-        -c["len"],                         # 12. true length
-        e.get("id", ""),                   # 13. stable final tiebreak -> deterministic order
+        0 if pos_ok else 1,                # 3. part-of-speech agreement (其処 pronoun > 底 noun)
+        0 if read_ok else 1,               # 4. reading agreement (any reading)
+        0 if primary_read_ok else 1,       # 5. the hovered reading is the entry's primary one
+        0 if read_pri_ok else 1,           # 6. the matched reading carries JMdict priority
+        0 if pref_ok else 1,               # 7. known dominant kanji for a kana verb (居る > 射る)
+        0 if uk_ok else 1,                 # 8. usually-kana word for a kana hover (uk boost)
+        len(c["reasons"]),                 # 9. fewer de-inflection steps (exact > inflected)
+        -common_lvl, -common_mag,          # 10. more common (JMdict-common tier > raw VN rank)
+        -c["len"],                         # 11. true length
+        e.get("id", ""),                   # 12. stable final tiebreak -> deterministic order
     )
 
 
@@ -724,6 +723,10 @@ def search_english(q):
     # The query matches a gloss when it's the whole gloss or a word-boundary
     # prefix of it ("sword" ~ "sword (esp. Japanese)", NOT "swordfish");
     # verb glosses drop their leading "to " so "eat" finds 食べる "to eat".
+    # The query drops it too, symmetrically — "to eat" used to rank like a
+    # mid-gloss hit and buried 食べる under 遣る.
+    if ql.startswith("to "):
+        ql = ql[3:]
     gm = re.compile(re.escape(ql) + r"($|[ ,;(])")
 
     def hits(sense):

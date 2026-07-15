@@ -70,6 +70,7 @@ CASES = [
 EN_CASES = [
     ("sword",              ("剣", "刀"),        "刀"),
     ("eat",                ("食べる", "食う"),   "食べる"),
+    ("to eat",             ("食べる", "食う"),   "食べる"),   # "to " prefix must not bury verbs
     ("half-hearted reply", ("生返事",),          "生返事"),
     ("cherry blossom",     ("桜",),              "桜"),
     ("beautiful",          ("綺麗", "美しい"),   "美しい"),

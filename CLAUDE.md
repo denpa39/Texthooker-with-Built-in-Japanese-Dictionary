@@ -51,7 +51,8 @@ emulator (PPSSPP/PCSX2/Vita3K/yuzu…) ── Agent GUI (agent/, launched via /a
   connects OUT to Textractor plugin :6677 / Agent :9001), Textractor driver glue, HTTP routes,
   SSE broadcast, dictionary lookup + ranking. Routes: `/scan` (ranked longest-match lookup — the
   core), `/lookup`, `/search` (English→Japanese reverse lookup: FTS5 `gloss_fts` MATCH, ranked
-  first-sense word-boundary match > any-sense > mid-gloss, then commonness; fetches ALL matches —
+  first-sense word-boundary match > any-sense > mid-gloss, then commonness; leading "to " is
+  stripped from query and gloss alike so "to eat" ranks like "eat"; fetches ALL matches —
   bm25 preselection cut 刀 from "sword"; returns scan-shaped candidates; graceful error when the
   index is missing), `/kanji`, `/events` (SSE), `/state`, `/pause`, `/processes` `/hooks` `/attach`
   `/detach` `/hookpick` (game hooking), `/ocr` `/ocr/region` `/ocr/start` `/ocr/stop` (OCR
