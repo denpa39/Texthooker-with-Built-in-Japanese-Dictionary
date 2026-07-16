@@ -25,13 +25,17 @@ python setup.py --agent          # opt-in (~120 MB): Agent (0xDC00) into agent/ 
 python test_ranking.py           # ranking + /search regression tests (needs dict.sqlite)
 python test_merge.py             # _merge_reads (py) vs mergeReads (js) parity (needs node)
 python test_ocr.py               # OCR pure-logic units (reading order, spans, PNG, gates)
+python test_text.py              # text plumbing: clean_hook_text, hook _split, ws extract,
+                                 # origin guard, romajiToKana via node (needs node)
+python test_qr.py                # QR encoder: format BCH, RS syndromes, structure, fixture
 python deinflect.py              # de-inflector self-test (41 cases)
 node --check static/app.js       # JS syntax check (no other lint/build step exists)
 build_exe.bat                    # PyInstaller one-file exes (app + setup)
 ```
 
-CI (`.github/workflows/tests.yml`) runs syntax + test_ocr + test_merge on every push;
-test_ranking self-skips there (no dict.sqlite) — run it locally before pushing ranking changes.
+CI (`.github/workflows/tests.yml`) runs syntax + test_ocr + test_merge + test_text +
+test_qr on every push; test_ranking self-skips there (no dict.sqlite) — run it locally
+before pushing ranking changes.
 
 UI verification: use the preview tools with `.claude/launch.json` server **"texthooker-verify"
 (port 6973)** — port 6972 ("texthooker") may be held by another session. Useful eval helpers:
@@ -66,10 +70,27 @@ emulator (PPSSPP/PCSX2/Vita3K/yuzu…) ── Agent GUI (agent/, launched via /a
   region's center, else the hooked pid's biggest visible window, else null; stdlib PNG encoder in
   ocr.py, GDI alpha must be forced to 255 or the PNG is transparent), `/anki` (proxy to
   AnkiConnect :8765 — CORS workaround), `/export` (writes exports/*.txt + opens Explorer —
-  WebView2 can't blob-download).
+  WebView2 can't blob-download), `/logsearch` (kana-insensitive substring over logs/*.txt,
+  newest file first, cap 200 — Ctrl+F only sees the reader's 300 kept lines; the find bar's
+  "logs" button shows hits in a pinned popup, click loads the line back into the reader),
+  `/audio` (JapanesePod101 word-audio proxy for the popup's ♪ — the service answers EVERY
+  query with something, a missing word returns a fixed 52,288-byte "not available" clip
+  that must 404, size gate in fetch_audio), `/qr` (PNG QR of LAN_URL else SERVER_URL —
+  qr.py: stdlib byte-mode QR, versions 1-5, EC L, mask 0; format-bit PLACEMENT is the trap,
+  it's the transpose of the data orientation — test_qr.py's fixture was frozen after
+  matching the `qrcode` reference lib module-for-module and decoding with jsQR),
+  `/favicon.ico` (static/favicon.ico, stdlib-generated ICO wrapping a PNG). **Every request
+  passes `request_allowed`** (server.py): CSRF/DNS-rebinding guard — Host, and Origin when
+  a browser sends one, must be localhost / *.local / a non-global IP (`ipaddress.is_global`
+  covers loopback+RFC1918+link-local+CGNAT, so Tailscale phones work); Origin "null" and
+  public hosts get 403. Closes drive-by localhost POSTs incl. the /anki relay. Matrix in
+  test_text.py. `/state` also carries `lan_url` (populates the Settings QR row when --lan).
 - **ocr.py** — OCR fallback for unhookable games: tkinter drag-a-box region picker (run as a
   SUBPROCESS — must not share a main thread with pywebview; frozen builds re-invoke the exe
-  with `--pick-region`), ctypes GDI region screenshot → BMP. Engine = `HybridOcr` when
+  with `--pick-region`; the overlay spans the whole VIRTUAL screen via overrideredirect +
+  SM_*VIRTUALSCREEN — "-fullscreen" only covered the primary monitor; canvas coords =
+  screen − (vx,vy), and /ocr/region takes a non-blocking lock so a double-click can't stack
+  two overlays), ctypes GDI region screenshot → BMP. Engine = `HybridOcr` when
   manga-ocr is installed: Windows.Media.Ocr (persistent PowerShell worker) locates text —
   per-line + per-word bounding boxes — and manga-ocr reads each line as chunks stacked
   vertically into a near-square canvas (its ViT resizes input to 224x224 — whole
@@ -153,15 +174,25 @@ emulator (PPSSPP/PCSX2/Vita3K/yuzu…) ── Agent GUI (agent/, launched via /a
   redownloading). Each setup step is idempotent (skips if present).
 - **deinflect.py + deinflect_data.py** — Yomitan's de-inflection rule table (GPL-3.0!) ported;
   `deinflect_data.py` is generated, don't hand-edit.
+- **qr.py** — minimal stdlib QR encoder for `/qr` (see the route note above). Self-contained;
+  `python qr.py` prints a test matrix as ASCII.
 - **static/app.js** — tokenizes lines with kuromoji.js in the browser, wraps tokens in hoverable
-  spans, fetches `/scan` per hover (cached), renders the popup (kanji cards, Anki export —
-  attaches the `/snap` game-window screenshot to the card's Sentence field, best-effort,
-  hide-names, romaji→kana for the lookup box), session persistence in localStorage. Lookup box
+  spans, fetches `/scan` per hover (cached), renders the popup (kanji cards, ♪ word audio via
+  `/audio`, Anki export — attaches the `/snap` game-window screenshot to the card's Sentence
+  field, best-effort, hide-names, romaji→kana for the lookup box), session persistence in
+  localStorage. Lookup box
   falls back to English (`/search`) when input is ASCII-but-not-valid-romaji or valid romaji
   that finds no Japanese entry. Ctrl+F find bar: kana-insensitive substring over each line's
-  `dataset.raw`, line-level highlight, Enter/Shift+Enter cycle from the newest match.
+  `dataset.raw`, line-level highlight, Enter/Shift+Enter cycle from the newest match; its
+  "logs" button searches every past session via `/logsearch`. Clear resets the stats counter
+  (chars measure THIS session). UI text sticks to basic-plane chars (♪ not 🔊) — WebView2
+  renders emoji as tofu.
 - **static/settings.js** — loaded blocking in `<head>` so the saved theme applies pre-paint.
   Theme = 6 CSS custom properties; every other colour derives via `color-mix()` in style.css.
+  The Settings panel's "Read on your phone" QR row (index.html #lanRow) is populated by
+  app.js from `/state`'s lan_url — hidden unless the server runs with --lan.
+- **LICENSE** — GPL-3.0 for the whole project (forced by the Yomitan-ported
+  deinflect_data.py; Textractor is GPL too). Don't add GPL-incompatible code/data.
 
 ### Ranking (the heart of `/scan`, server.py)
 

@@ -134,7 +134,12 @@ with `--freq`.
   "cherry blossom" searches the dictionary definitions and finds 桜 (full-text index
   over every JMdict gloss, built by setup.py).
 - **Find in lines (Ctrl+F)** — search everything you've read this session
-  (kana-insensitive, さくら finds サクラ); Enter / Shift+Enter cycle matches.
+  (kana-insensitive, さくら finds サクラ); Enter / Shift+Enter cycle matches. The bar's
+  **logs** button searches every *past* session too (the server's `logs/` files) and
+  clicking a result loads that line back into the reader, hoverable again.
+- **Word audio** — the ♪ button in the popup plays the word's pronunciation
+  (JapanesePod101 recordings, the same source Yomitan uses; needs internet, words
+  without a recording show ✗).
 - **VN frequency chip** (№1,638) in the popup so you can tell at a glance whether a word
   is worth mining; green = common in visual novels.
 - **Anki export** — the ★ button on any entry adds a card (word, reading, meanings,
@@ -153,6 +158,7 @@ with `--freq`.
   or Agent (:9001) with no clipboard round-trip; `--ws` configures or disables it.
 - **LAN mode** — `python server.py --lan` prints a LAN URL so you can read along on a
   phone or tablet while the game runs on the PC (the layout adapts to small screens).
+  Settings shows a **QR code** of that address — scan it instead of typing the IP.
 - **Tokenizer-anchored ranking** so the intended word comes first. It trusts kuromoji's
   own analysis of each token — part-of-speech (は = particle, not 羽 "feather"), reading
   (本【ほん】"book", not 本【もと】"origin"), dictionary form (居る "to be", not 射る
@@ -269,6 +275,8 @@ re-downloading the app.
 
 ## Data & licences
 
+- **This project: GPL-3.0** (see `LICENSE`) — required by the Yomitan-derived
+  de-inflection table below.
 - Definitions: **JMdict / JMnedict** (EDRDG licence).
 - De-inflection rules: ported from **Yomitan**'s Japanese transforms — **GPL-3.0**
   (`deinflect_data.py`; if you redistribute this project, GPL-3.0 terms apply to it).

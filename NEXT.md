@@ -9,12 +9,29 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 
 ## Remaining ideas
 
-- **Word audio** — 🔊 button, Yomitan-style JapanesePod101 URL. Needs internet; optional.
-- **OCR niceties** — multi-monitor region picker (current overlay covers the primary
-  monitor), optional per-region preprocessing (upscale/threshold) for low-contrast text.
-- **Search the on-disk logs** — Ctrl+F covers the kept session lines; lines evicted
-  past the 300 cap live only in `logs/*.txt` and need a server-side grep route.
-- **QR code for the `--lan` URL** — kills type-an-IP-on-your-phone friction.
+- **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
+  text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
+
+## Done (2026-07-16)
+
+Review sweep, all five findings: **LICENSE** (GPL-3.0 — deinflect_data.py is
+Yomitan-derived; README/CLAUDE.md note the project licence). **Origin guard**
+(`request_allowed` on every request: Host + Origin must be localhost/*.local/
+non-global IP, kills drive-by CSRF POSTs against 127.0.0.1 — incl. the /anki
+open relay — and DNS rebinding; Tailscale CGNAT stays allowed; matrix in
+test_text.py). **Log search** (`/logsearch` + "logs" button in the find bar —
+hits grouped by session file in a pinned popup, click loads the line back,
+hoverable). **Word audio** (`/audio` JapanesePod101 proxy + ♪ popup button;
+the service's fixed 52,288-byte "not available" clip 404s). **LAN QR**
+(`/qr` + Settings "Read on your phone" row; qr.py is a ~200-line stdlib QR
+encoder — byte mode, v1-5, EC L, mask 0 — verified against the qrcode lib
+module-for-module and decoded with jsQR, then frozen as a fixture in
+test_qr.py). **Multi-monitor OCR picker** (overlay spans the virtual screen,
+overrideredirect + SM_*VIRTUALSCREEN; /ocr/region takes a lock so double-click
+can't stack overlays). Nits: /search overflow now drops the obscure tail
+(ORDER BY freq), favicon (stdlib-generated ICO), Clear resets the stats
+counter, test_text.py covers clean_hook_text / hook._split / _ws_extract_text
+/ romajiToKana (node harness like test_merge). CI runs the two new suites.
 
 ## Done (2026-07-14)
 
@@ -106,8 +123,8 @@ furigana-on-unknown-only (back to plain on/off).
 
 ## Known loose ends
 
-- Yomitan rule table is **GPL-3.0** (`deinflect_data.py`) — if the repo is published,
-  it must carry a GPL-compatible licence. Noted in README "Data & licences".
+- ~~Yomitan rule table is **GPL-3.0** (`deinflect_data.py`) — if the repo is published,
+  it must carry a GPL-compatible licence.~~ Resolved 2026-07-16: `LICENSE` = GPL-3.0.
 - One test Anki card (食べる) may still be in the user's Anki deck "Down the Rabbit Hole".
 - `dict.sqlite` not committed by design; fresh clones run `python setup.py`.
 - New setup steps [5/8] kanji and [6/8] examples add tables to an existing

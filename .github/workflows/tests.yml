@@ -11,12 +11,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Syntax (python + js)
         run: |
-          python -m py_compile server.py ocr.py hook.py deinflect.py deinflect_data.py setup.py test_ranking.py test_merge.py test_ocr.py
+          python -m py_compile server.py ocr.py hook.py qr.py deinflect.py deinflect_data.py setup.py test_ranking.py test_merge.py test_ocr.py test_text.py test_qr.py
           node --check static/app.js
           node --check static/settings.js
       - name: OCR logic tests
         run: python test_ocr.py
       - name: Merge parity (python vs js)
         run: python test_merge.py
+      - name: Text plumbing tests (py + js romaji)
+        run: python test_text.py
+      - name: QR encoder tests
+        run: python test_qr.py
       - name: Ranking tests (self-skips without dict.sqlite)
         run: python test_ranking.py

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Down the Rabbit Hole</title>
+<link rel="icon" href="/static/favicon.ico">
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/settings.js"></script>
 </head>
@@ -64,6 +65,11 @@
   <label class="set-text">Anki deck
     <input id="deckInput" type="text" spellcheck="false" aria-label="Anki deck name">
   </label>
+  <div id="lanRow" class="lan-row hidden">
+    <div class="set-label">Read on your phone</div>
+    <img id="lanQr" alt="QR code of the LAN address" width="132" height="132">
+    <div id="lanUrl" class="lan-url"></div>
+  </div>
   <button id="setReset" class="set-reset">Reset to default</button>
 </aside>
 
@@ -92,6 +98,7 @@
   <span id="findCount" class="find-count" aria-live="polite"></span>
   <button id="findPrev" title="Previous match (Shift+Enter)" aria-label="Previous match">↑</button>
   <button id="findNext" title="Next match (Enter)" aria-label="Next match">↓</button>
+  <button id="findLogs" title="Search every past session (the on-disk logs, not just these lines)" aria-label="Search past sessions">logs</button>
   <button id="findClose" title="Close (Esc)" aria-label="Close find">×</button>
 </div>
 

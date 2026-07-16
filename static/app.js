@@ -605,6 +605,28 @@ function renderCandidate(c, sentence) {
   jisho.addEventListener("click", ev => ev.stopPropagation());
   head.appendChild(jisho);
 
+  if (c.kind !== "name" && entry.r && entry.r.length) {
+    const audio = document.createElement("button");
+    audio.className = "mini";
+    audio.textContent = "♪";   // basic-plane char — WebView2 renders emoji as tofu
+    audio.title = "play pronunciation (JapanesePod101 — needs internet)";
+    audio.setAttribute("aria-label", "play pronunciation of " + primary);
+    audio.addEventListener("click", ev => {
+      ev.stopPropagation();
+      const k = (entry.k && entry.k[0]) || entry.r[0];
+      const a = new Audio("/audio?" + new URLSearchParams({ k, r: c.mr || entry.r[0] }));
+      audio.textContent = "…";
+      const done = ok => {
+        audio.textContent = ok ? "♪" : "✗";
+        if (!ok) setTimeout(() => (audio.textContent = "♪"), 1500);
+      };
+      a.onended = () => done(true);          // reset once it finishes playing
+      a.onerror = () => done(false);         // 404 = JPod101 has no recording
+      a.play().then(() => (audio.textContent = "♪")).catch(() => done(false));
+    });
+    head.appendChild(audio);
+  }
+
   if (c.kind !== "name") {
     const star = document.createElement("button");
     star.className = "mini";
@@ -1051,6 +1073,11 @@ const pauseBtn = document.getElementById("pauseBtn");
 async function refreshPause() {
   const j = await (await fetch("/state")).json();
   applyPause(j.paused);
+  if (j.lan_url) {   // --lan: show the phone QR in Settings
+    document.getElementById("lanRow").classList.remove("hidden");
+    document.getElementById("lanQr").src = "/qr";
+    document.getElementById("lanUrl").textContent = j.lan_url;
+  }
 }
 function applyPause(paused) {
   pauseBtn.classList.toggle("active", paused);
@@ -1197,6 +1224,52 @@ findInput.addEventListener("keydown", e => {
 document.getElementById("findPrev").addEventListener("click", () => jumpFind(-1));
 document.getElementById("findNext").addEventListener("click", () => jumpFind(1));
 document.getElementById("findClose").addEventListener("click", closeFind);
+
+// "logs": the same query against every past session on disk (/logsearch over
+// logs/*.txt) — Ctrl+F only sees the 300 lines the DOM keeps. Results open in
+// a pinned popup; clicking one loads the line into the reader, hoverable again.
+document.getElementById("findLogs").addEventListener("click", async () => {
+  const q = findInput.value.trim();
+  if (!q) { findInput.focus(); return; }
+  let j;
+  try { j = await (await fetch("/logsearch?q=" + encodeURIComponent(q))).json(); }
+  catch (_) { return; }
+  pinned = true;
+  popup.classList.add("pinned");
+  activeWord = null;
+  popup.innerHTML = "";
+  const close = document.createElement("button");
+  close.className = "pin-close";
+  close.textContent = "×";
+  close.title = "close";
+  close.setAttribute("aria-label", "close");
+  close.addEventListener("click", unpin);
+  popup.appendChild(close);
+  const hits = j.hits || [];
+  const head = document.createElement("div");
+  head.className = "log-head";
+  head.textContent = hits.length
+    ? `「${q}」 in past sessions — ${hits.length}${j.truncated ? "+" : ""} line${hits.length > 1 ? "s" : ""}, click one to load it:`
+    : `「${q}」 isn't in any past session (logs/)`;
+  popup.appendChild(head);
+  let lastFile = null;
+  hits.forEach(h => {
+    if (h.file !== lastFile) {
+      lastFile = h.file;
+      const f = document.createElement("div");
+      f.className = "log-file";
+      f.textContent = h.file;
+      popup.appendChild(f);
+    }
+    const d = document.createElement("div");
+    d.className = "log-hit";
+    d.textContent = h.line;
+    d.title = "load this line into the reader";
+    d.addEventListener("click", ev => { ev.stopPropagation(); addLine(h.line); });
+    popup.appendChild(d);
+  });
+  finishPopup(findBar, false);
+});
 document.addEventListener("keydown", e => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
     e.preventDefault();   // replace the browser's find — it can't see dataset.raw across ruby/furigana
@@ -1241,6 +1314,10 @@ clearAllBtn.addEventListener("click", () => {
   if (!popup.classList.contains("hidden")) unpin();
   linesEl.innerHTML = "";
   hint.classList.remove("gone");
+  // The stats measure THIS session's reading — clearing it resets the count.
+  sessionChars = 0;
+  sessionStart = 0;
+  statsEl.textContent = "";
   saveSession();
 });
 

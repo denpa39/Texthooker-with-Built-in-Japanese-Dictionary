@@ -582,6 +582,26 @@ ruby rt { font-size: var(--furi-size); color: var(--furigana); user-select: none
 .line.find-hit { background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 8px; }
 .line.find-cur { background: color-mix(in srgb, var(--accent) 26%, transparent); }
 
+/* log-search results (the find bar's "logs" button) shown in the pinned popup */
+.log-head { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.log-file {
+  margin: 9px 0 3px; font-size: 11px; font-weight: 600;
+  color: var(--muted); text-transform: none; letter-spacing: .02em;
+}
+.log-hit { padding: 3px 7px; border-radius: 7px; cursor: pointer; font-size: 15px; }
+.log-hit:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+/* LAN QR in Settings (only shown when the server runs with --lan) */
+.lan-row img {
+  display: block; margin: 8px auto 5px;
+  border-radius: 10px; border: 1px solid var(--line);
+}
+.lan-row.hidden { display: none; }
+.lan-url {
+  text-align: center; font-size: 12px; color: var(--muted);
+  user-select: all;    /* one click selects the whole address */
+}
+
 /* No backdrop-filter support (old engines): fall back to solid surfaces so the
    glass tint never leaves text floating on a busy gradient. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {

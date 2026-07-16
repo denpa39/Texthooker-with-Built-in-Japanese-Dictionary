@@ -15,6 +15,7 @@ import argparse
 import base64
 import ctypes
 import functools
+import ipaddress
 import json
 import os
 import queue
@@ -30,7 +31,7 @@ import urllib.request
 import webbrowser
 from ctypes import wintypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlencode, urlsplit
 
 import deinflect
 import hook
@@ -207,6 +208,9 @@ def clipboard_monitor(paused_flag):
 
 
 PAUSED = threading.Event()  # set => clipboard monitoring paused
+LAN_URL = None              # set by main() when --lan; /state + /qr expose it
+SERVER_URL = ""             # this server's own URL (QR fallback when not on LAN)
+_PICKER_LOCK = threading.Lock()   # one OCR region-picker overlay at a time
 
 # OCR fallback source (ocr.py): screenshots a user-chosen region and OCRs it —
 # for games Textractor can't hook. Pause stops it like every other source.
@@ -714,9 +718,11 @@ def search_english(q):
         # ALL matches — bm25 preselection loves short rare entries and cut 刀
         # from "sword" entirely; worst case ("go") is ~1k rows, cheap + cached.
         match = " ".join('"%s"' % w for w in words)
+        # ORDER BY freq: if a broad query overflows the LIMIT, the arbitrary
+        # subset dropped must be the obscure tail, not whatever rowid order cut.
         rows = db.execute(
             "SELECT e.json FROM gloss_fts f JOIN entries e ON e.id = f.rowid "
-            "WHERE gloss_fts MATCH ? LIMIT 2000", (match,)).fetchall()
+            "WHERE gloss_fts MATCH ? ORDER BY e.freq DESC LIMIT 2000", (match,)).fetchall()
     except sqlite3.OperationalError:
         return None
     ql = " ".join(words).lower()
@@ -748,6 +754,51 @@ def search_english(q):
              "reasons": [], "kind": "word", "entry": e} for e in entries]
 
 
+def search_logs(q, limit=200):
+    """Substring search over the on-disk session logs (logs/*.txt), newest file
+    first, kana-insensitive like the reader's Ctrl+F. The reader keeps only 300
+    lines in the DOM — anything older lives ONLY here."""
+    q_h = to_hiragana((q or "").strip().lower())
+    if not q_h:
+        return {"hits": [], "truncated": False}
+    hits = []
+    try:
+        names = sorted((n for n in os.listdir(LOG_DIR) if n.endswith(".txt")), reverse=True)
+    except OSError:
+        names = []
+    for fname in names:
+        try:
+            with open(os.path.join(LOG_DIR, fname), encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and q_h in to_hiragana(line.lower()):
+                        hits.append({"file": fname[:-4], "line": line})
+                        if len(hits) >= limit:
+                            return {"hits": hits, "truncated": True}
+        except OSError:
+            continue
+    return {"hits": hits, "truncated": False}
+
+
+# JapanesePod101 word audio (the same source Yomitan uses). The service answers
+# EVERY query; a missing word returns a fixed "not available" announcement clip
+# recognisable by its exact size — that must 404, not play.
+_JPOD_NOT_FOUND_SIZE = 52288
+
+
+@functools.lru_cache(maxsize=64)
+def fetch_audio(kanji, kana):
+    """MP3 bytes for a word, or None when JPod101 has no real recording."""
+    url = ("https://assets.languagepod101.com/dictionary/japanese/audiomp3.php?"
+           + urlencode({"kanji": kanji, "kana": kana or kanji}))
+    req = urllib.request.Request(url, headers={"User-Agent": "texthooker/1.0"})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        data = resp.read()
+    if len(data) == _JPOD_NOT_FOUND_SIZE or len(data) < 2048:
+        return None
+    return data
+
+
 def kanji_info(ch):
     """KANJIDIC2 card for one kanji (None without the table / unknown char)."""
     if not ch:
@@ -758,6 +809,56 @@ def kanji_info(ch):
     except sqlite3.OperationalError:
         return None
     return json.loads(row[0]) if row else None
+
+
+# --------------------------------------------------------------------------- #
+# Request-origin guard (CSRF / DNS-rebinding)
+#
+# The server is a localhost tool with side-effectful POST routes (/attach
+# injects into a pid, /anki relays to AnkiConnect with the browser's Origin
+# stripped). A malicious web page can fire "simple" cross-origin POSTs at
+# 127.0.0.1 without any CORS preflight — the response is unreadable but the
+# side effect happens — and DNS rebinding lets a page READ responses (/snap is
+# a game screenshot). So: the Host header must be a local name (kills
+# rebinding — evil.com resolving to 127.0.0.1 still says Host: evil.com), and
+# an Origin header, when a browser sends one, must be local too (kills CSRF
+# from web pages; non-browser clients like curl send no Origin and pass).
+# --------------------------------------------------------------------------- #
+def _is_local_host(name):
+    """A hostname that can only mean "this machine / this LAN"."""
+    if not name:
+        return False
+    name = name.lower().rstrip(".")
+    if name == "localhost" or name.endswith(".localhost") or name.endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(name)
+    except ValueError:
+        return False   # any public DNS name — includes rebinding domains
+    # not-global covers loopback, RFC1918, link-local AND CGNAT (100.64/10 —
+    # a phone reading over Tailscale lands there).
+    return not ip.is_global
+
+
+def request_allowed(headers):
+    """True when the request provably came from this machine or the local net."""
+    try:
+        host = urlsplit("//" + (headers.get("Host") or "")).hostname
+    except ValueError:
+        return False
+    if not _is_local_host(host or ""):
+        return False
+    origin = headers.get("Origin")
+    if origin:
+        if origin == "null":       # sandboxed iframe / saved-to-disk page
+            return False
+        try:
+            ohost = urlsplit(origin).hostname
+        except ValueError:
+            return False
+        if not _is_local_host(ohost or ""):
+            return False
+    return True
 
 
 # --------------------------------------------------------------------------- #
@@ -818,6 +919,9 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- routes ------------------------------------------------------------ #
     def do_GET(self):
+        if not request_allowed(self.headers):
+            self._send_json({"error": "forbidden origin"}, 403)
+            return
         parsed = urlparse(self.path)
         path = parsed.path
 
@@ -862,8 +966,38 @@ class Handler(BaseHTTPRequestHandler):
             qs = parse_qs(parsed.query)
             ch = (qs.get("c") or [""])[0]
             self._send_json({"kanji": ch[:1], "info": kanji_info(ch)})
+        elif path == "/logsearch":
+            qs = parse_qs(parsed.query)
+            self._send_json(search_logs((qs.get("q") or [""])[0]))
+        elif path == "/audio":
+            qs = parse_qs(parsed.query)
+            k = (qs.get("k") or [""])[0].strip()
+            r = (qs.get("r") or [""])[0].strip()
+            if not k:
+                self._send_json({"error": "no word"}, 400)
+                return
+            try:
+                data = fetch_audio(k, r)
+            except Exception:
+                data = None
+            if data:
+                # cacheable: a word's recording never changes
+                self._send_bytes(data, "audio/mpeg", cache="public, max-age=604800")
+            else:
+                self._send_json({"error": "no audio for this word"}, 404)
+        elif path == "/qr":
+            # QR of the URL a phone should open — the LAN URL when --lan,
+            # else this server's own URL (still handy for a local scan test).
+            try:
+                import qr
+                png = ocr._encode_png(*qr.png_pixels(LAN_URL or SERVER_URL))
+                self._send_bytes(png, "image/png")
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+        elif path == "/favicon.ico":
+            self._serve_file("static/favicon.ico")
         elif path == "/state":
-            self._send_json({"paused": PAUSED.is_set()})
+            self._send_json({"paused": PAUSED.is_set(), "lan_url": LAN_URL})
         elif path == "/processes":
             self._send_json({"available": hook.available(),
                              "processes": hook.list_processes()})
@@ -898,6 +1032,9 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def do_POST(self):
+        if not request_allowed(self.headers):
+            self._send_json({"error": "forbidden origin"}, 403)
+            return
         parsed = urlparse(self.path)
         if parsed.path == "/attach":
             try:
@@ -914,8 +1051,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(hooker.state())
         elif parsed.path == "/ocr/region":
             # Opens the fullscreen drag-a-box overlay (subprocess); blocks this
-            # request until the user releases the drag or cancels.
-            region = ocr.pick_region_subprocess()
+            # request until the user releases the drag or cancels. One at a
+            # time — a double-click used to stack two overlays.
+            if not _PICKER_LOCK.acquire(blocking=False):
+                self._send_json({"error": "picker already open — finish that one first",
+                                 **ocr_source.state()}, 409)
+                return
+            try:
+                region = ocr.pick_region_subprocess()
+            finally:
+                _PICKER_LOCK.release()
             if region:
                 ocr_source.set_region(region)
             self._send_json(ocr_source.state())
@@ -1091,6 +1236,8 @@ def main():
                f"python server.py --port 4040")
     # 0.0.0.0 listens everywhere but isn't a browsable address — open localhost.
     url = f"http://{'127.0.0.1' if args.host in ('0.0.0.0', '::') else args.host}:{args.port}/"
+    global SERVER_URL, LAN_URL
+    SERVER_URL = url
     print(f"Down the Rabbit Hole - running at {url}")
     if args.host in ("0.0.0.0", "::"):
         try:
@@ -1098,7 +1245,8 @@ def main():
             probe.connect(("8.8.8.8", 80))          # no traffic sent; just picks the LAN interface
             lan_ip = probe.getsockname()[0]
             probe.close()
-            print(f"LAN: http://{lan_ip}:{args.port}/  (open on your phone/tablet)")
+            LAN_URL = f"http://{lan_ip}:{args.port}/"
+            print(f"LAN: {LAN_URL}  (open on your phone/tablet — QR code in Settings)")
         except OSError:
             pass
     print("Text sources: Attach button (embedded Textractor), clipboard (Textractor's "

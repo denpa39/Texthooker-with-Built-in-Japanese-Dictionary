@@ -214,27 +214,43 @@ def snap_window_png(region=None, pid=None):
 # --------------------------------------------------------------------------- #
 def pick_region_main():
     """Entry point for the picker subprocess: prints {"x","y","w","h"} JSON on
-    success, nothing on cancel (Esc / click without drag)."""
+    success, nothing on cancel (Esc / click without drag). The overlay spans the
+    whole VIRTUAL screen (every monitor) — "-fullscreen" only covered the
+    primary, so a game on a second monitor couldn't be picked. Coordinates are
+    kept in the same DPI-unaware space the capture side uses."""
     import tkinter as tk
     root = tk.Tk()
-    root.attributes("-fullscreen", True)
+    # Virtual-screen bounds (can start at negative x/y when a monitor sits
+    # left of / above the primary). SM_*VIRTUALSCREEN = 76-79.
+    try:
+        gsm = ctypes.windll.user32.GetSystemMetrics
+        vx, vy, vw, vh = gsm(76), gsm(77), gsm(78), gsm(79)
+    except Exception:                        # non-Windows: primary screen only
+        vx = vy = 0
+        vw, vh = root.winfo_screenwidth(), root.winfo_screenheight()
+    root.overrideredirect(True)              # no decorations; spans monitors
+    root.geometry(f"{vw}x{vh}+{vx}+{vy}")
     root.attributes("-alpha", 0.3)
     root.attributes("-topmost", True)
     root.configure(bg="black", cursor="crosshair")
     cv = tk.Canvas(root, bg="black", highlightthickness=0)
     cv.pack(fill="both", expand=True)
-    cv.create_text(root.winfo_screenwidth() // 2, 60, fill="white",
+    # Canvas coords = screen coords - (vx, vy). Instructions on the primary.
+    cv.create_text(-vx + root.winfo_screenwidth() // 2, -vy + 60, fill="white",
                    font=("Segoe UI", 16),
                    text="Drag a box over the game's TEXT area (skip the UI) — Esc cancels")
     sel = {"x0": None, "y0": None, "rect": None}
 
     def press(e):
         sel["x0"], sel["y0"] = e.x_root, e.y_root
-        sel["rect"] = cv.create_rectangle(e.x, e.y, e.x, e.y, outline="#5f93de", width=3)
+        sel["rect"] = cv.create_rectangle(e.x_root - vx, e.y_root - vy,
+                                          e.x_root - vx, e.y_root - vy,
+                                          outline="#5f93de", width=3)
 
     def drag(e):
         if sel["rect"] is not None:
-            cv.coords(sel["rect"], sel["x0"], sel["y0"], e.x_root, e.y_root)
+            cv.coords(sel["rect"], sel["x0"] - vx, sel["y0"] - vy,
+                      e.x_root - vx, e.y_root - vy)
 
     def release(e):
         if sel["x0"] is None:
@@ -251,6 +267,8 @@ def pick_region_main():
     cv.bind("<B1-Motion>", drag)
     cv.bind("<ButtonRelease-1>", release)
     root.bind("<Escape>", lambda e: root.destroy())
+    # overrideredirect windows don't get keyboard focus by default — Esc needs it
+    root.after(50, root.focus_force)
     root.mainloop()
 
 
