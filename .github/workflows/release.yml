@@ -1,0 +1,51 @@
+# Tag a version (git tag v1.0 && git push --tags) and this builds the two
+# Windows exes with PyInstaller and attaches a ready-to-use zip to the GitHub
+# release — the no-Python install path in README's Quick start.
+#
+# The zip holds DownTheRabbitHole.exe + RabbitHoleSetup.exe + docs. Data stays
+# OUTSIDE the exes by design (sys.frozen resolves BASE_DIR to the exe's folder):
+# the user runs RabbitHoleSetup.exe once, everything downloads next to it.
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # pywebview gets bundled into the app exe (PyInstaller picks up the
+      # function-level `import webview`); without it the app would fall back
+      # to the browser, which is a worse first impression.
+      - name: Install build deps
+        run: python -m pip install pyinstaller pywebview
+      - name: Build app exe
+        run: python -m PyInstaller --noconfirm --onefile --noconsole --name DownTheRabbitHole server.py
+      - name: Build setup exe
+        run: python -m PyInstaller --noconfirm --onefile --name RabbitHoleSetup setup.py
+      - name: Package zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist\bundle | Out-Null
+          Copy-Item dist\DownTheRabbitHole.exe, dist\RabbitHoleSetup.exe, README.md, LICENSE dist\bundle
+          Set-Content -Encoding utf8 dist\bundle\START-HERE.txt @"
+          Down the Rabbit Hole - first run
+          ================================
+          1. Run RabbitHoleSetup.exe once (downloads the dictionary + tools, ~250 MB).
+          2. Run DownTheRabbitHole.exe.
+          That's it. Keep both exes in this folder - the downloaded data lives here too.
+          (If you skip step 1, the app offers to run it for you.)
+          "@
+          Compress-Archive -Path dist\bundle\* -DestinationPath DownTheRabbitHole-win64.zip
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: DownTheRabbitHole-win64.zip
+          body: |
+            **Install:** unzip anywhere → run `RabbitHoleSetup.exe` once (downloads the dictionary and tools) → run `DownTheRabbitHole.exe`. No Python needed.

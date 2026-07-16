@@ -1169,6 +1169,52 @@ def _fatal(msg):
     sys.exit(1)
 
 
+def _run_first_time_setup():
+    """The dictionary/tokenizer are missing: offer to run setup right here
+    instead of dying with "run setup.py" — a fresh user shouldn't need to know
+    there are two programs. Returns True when setup ran and reported success."""
+    if getattr(sys, "frozen", False):
+        exe = os.path.join(BASE_DIR, "RabbitHoleSetup.exe")
+        if not os.path.isfile(exe):
+            return False                     # _fatal will say to get both exes
+        setup_cmd = [exe]
+    else:
+        py = sys.executable
+        # run.bat launches us with pythonw (no console) — setup's download
+        # progress needs a real console, so prefer the python.exe sibling.
+        if os.path.basename(py).lower() == "pythonw.exe":
+            cand = os.path.join(os.path.dirname(py), "python.exe")
+            if os.path.isfile(cand):
+                py = cand
+        setup_cmd = [py, os.path.join(BASE_DIR, "setup.py")]
+
+    have_console = True
+    if sys.platform == "win32":
+        try:
+            have_console = ctypes.windll.kernel32.GetConsoleWindow() != 0
+        except Exception:
+            pass
+    prompt = ("First run: the dictionary and tools need to be downloaded "
+              "(one time, roughly 250 MB).")
+    try:
+        if have_console:
+            print(prompt)
+            input("Press Enter to run setup now (Ctrl+C to cancel)... ")
+            return subprocess.call(setup_cmd) == 0
+        # Console-less (pythonw / --noconsole exe): ask via message box and give
+        # setup its own console window so the download progress is visible.
+        MB_YESNO_QUESTION, IDYES = 0x24, 6
+        if ctypes.windll.user32.MessageBoxW(
+                None, prompt + "\n\nRun setup now? A console window will show "
+                "the progress.", "Down the Rabbit Hole", MB_YESNO_QUESTION) != IDYES:
+            return False
+        return subprocess.call(setup_cmd, creationflags=0x10) == 0  # NEW_CONSOLE
+    except (KeyboardInterrupt, EOFError):
+        return False
+    except OSError:
+        return False
+
+
 def main():
     try:
         sys.stdout.reconfigure(errors="replace")   # never crash printing to a non-UTF-8 console
@@ -1197,10 +1243,16 @@ def main():
     if args.lan:
         args.host = "0.0.0.0"
 
-    if not os.path.isfile(DB_PATH):
-        _fatal("dict.sqlite not found. Run:  python setup.py")
-    if not os.path.isfile(os.path.join(STATIC_DIR, "kuromoji", "kuromoji.js")):
-        _fatal("kuromoji tokenizer missing. Run:  python setup.py")
+    kuromoji_js = os.path.join(STATIC_DIR, "kuromoji", "kuromoji.js")
+    if not (os.path.isfile(DB_PATH) and os.path.isfile(kuromoji_js)):
+        _run_first_time_setup()              # offers, runs, and reports itself
+        if not os.path.isfile(DB_PATH) or not os.path.isfile(kuromoji_js):
+            _fatal("Setup hasn't completed — the dictionary is still missing.\n"
+                   + ("Run RabbitHoleSetup.exe (it belongs next to this exe, both "
+                      "come in the release zip), then start the app again."
+                      if getattr(sys, "frozen", False) else
+                      "Run:  python setup.py   (or double-click setup.bat), "
+                      "then start the app again."))
 
     if sys.platform != "win32":
         print("Warning: clipboard monitoring only works on Windows. "

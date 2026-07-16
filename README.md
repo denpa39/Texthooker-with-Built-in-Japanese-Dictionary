@@ -11,20 +11,37 @@ and part of speech, Yomitan-style.
 
 ---
 
-## Quick start
+## Install
+
+### Easiest — no Python needed (Windows)
+
+1. Download **DownTheRabbitHole-win64.zip** from the
+   [latest release](../../releases/latest) and unzip it anywhere.
+2. Run **RabbitHoleSetup.exe** once — it downloads the dictionary and tools
+   (~250 MB, one time) right next to the exe.
+3. Run **DownTheRabbitHole.exe** and start reading.
+
+Forgot step 2? The app notices and offers to run setup for you.
+
+### With Python (3.9+)
+
+Download the source (green **Code** button → Download ZIP, or `git clone`), then
+**double-click `run.bat`** — the first run sets everything up automatically and
+opens the app. That's the whole install.
+
+The same, by hand:
 
 ```sh
-# (recommended) better word-frequency ranking during the build
-python -m pip install wordfreq
-
-# 1. One-time setup — downloads the kuromoji tokenizer, JMdict, and the
-#    JMnedict name dictionary, then builds the database.
-python setup.py            # (or double-click setup.bat)
-#    python setup.py --no-names   # skip names to keep the DB small (~74 MB vs ~250 MB)
-
-# 2. Run it
-python server.py           # (or double-click run.bat)
+python setup.py            # one-time: tokenizer, dictionaries, hook engine,
+                           # VN word frequency — every piece skipped if present
+python server.py           # run (or double-click run.bat)
 ```
+
+Setup takes care of the extras itself: it pip-installs `wordfreq` (build-time
+ranking data) and `pywebview` (the app window) when they're missing, and picks a
+visual-novel frequency list automatically — `jiten_vn.zip` if you've downloaded
+one (see below), else the Innocent Corpus. `python setup.py --no-names` keeps the
+database small (~74 MB vs ~250 MB).
 
 The app opens in **its own window** (no browser needed — falls back to your browser
 if `pywebview` isn't installed). Copy some Japanese text and it appears instantly.
@@ -82,17 +99,19 @@ frame with no Japanese found is skipped entirely.
 
 **Tip:** click a word to pin its popup open; press **Esc** to close. Hover gives a quick peek.
 
-### Visual-novel frequency ranking (optional, recommended for VN readers)
+### Visual-novel frequency ranking (automatic, upgradeable)
 
-By default, ranking uses a general-corpus frequency (`wordfreq`). For VN-accurate
-ranking, import a **visual-novel frequency list** from
-[jiten.moe](https://jiten.moe/other):
+Fresh installs get VN-flavoured ranking out of the box: setup auto-downloads the
+**Innocent Corpus** VN/novel frequency list. It's decent but coarse — it omits
+some very common function words and under-counts する. For the best ranking,
+upgrade to the **jiten.moe visual-novel list**:
 
 1. Go to **https://jiten.moe/other**, pick **Visual Novel**, and download the
-   **Yomitan** frequency dictionary (a `.zip`). Save it into this folder.
+   **Yomitan** frequency dictionary (a `.zip`). Save it into this folder as
+   `jiten_vn.zip` — setup picks it up automatically from now on.
 2. Rebuild with it:
    ```sh
-   python setup.py --skip-kuromoji --force --freq jiten_vn.zip
+   python setup.py --skip-kuromoji --force
    ```
 
 Now lookups prefer the reading that's common in visual novels, and a longer match is
@@ -101,12 +120,9 @@ and という still win, but a rare homograph like 底荷「そこに」"ballast
 そこ "there". Frequency data: jiten.moe, **CC BY-SA 4.0**. (Definitions remain
 JMdict/JMnedict — the same sources jiten itself uses.)
 
-**No-manual-step alternative:** `python setup.py --skip-kuromoji --force --innocent`
-auto-downloads the **Innocent Corpus** VN/novel frequency list instead. It's convenient
-but coarser — it omits some very common function words and under-counts する — so the
-hand-downloaded jiten.moe VN list above is recommended. The frequency loader
-auto-detects rank-style vs. count-style lists, so any Yomitan frequency `.zip` works
-with `--freq`.
+The frequency loader auto-detects rank-style vs. count-style lists, so any Yomitan
+frequency `.zip` works via `--freq path.zip`; `--no-vn-freq` skips VN frequency
+entirely (general word frequency only).
 
 ---
 
@@ -243,6 +259,10 @@ PyInstaller. Ship both in one folder: the user runs the setup exe once (it
 downloads the tokenizer, dictionaries and Textractor next to itself), then the
 app exe. The data stays outside the exe, so dictionary rebuilds don't mean
 re-downloading the app.
+
+Pushing a tag (`git tag v1.0 && git push --tags`) builds the same pair on CI
+(`.github/workflows/release.yml`) and attaches **DownTheRabbitHole-win64.zip**
+to the GitHub release — that's what the "no Python needed" install path uses.
 
 ---
 

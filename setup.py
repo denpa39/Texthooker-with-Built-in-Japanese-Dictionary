@@ -20,6 +20,7 @@ import io
 import json
 import os
 import sqlite3
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -148,6 +149,26 @@ def extract_json(archive_path):
             name = next(n for n in zf.namelist() if n.endswith(".json"))
             return zf.read(name)
     raise RuntimeError("Unknown archive format: " + archive_path)
+
+
+def setup_wordfreq():
+    """Best-effort pip install of wordfreq (general word-frequency data — better
+    homograph ranking at build time). Same pattern as pywebview below: not fatal,
+    the build falls back to JMdict's common flag. Frozen builds skip pip; the VN
+    frequency list carries the ranking there."""
+    try:
+        import wordfreq  # noqa: F401
+        return
+    except ImportError:
+        pass
+    if getattr(sys, "frozen", False):
+        return
+    print("  installing wordfreq (one-time, improves ranking)...")
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "wordfreq"],
+                              stdout=subprocess.DEVNULL)
+    except Exception as e:
+        print(f"  wordfreq unavailable ({e}) — ranking falls back to the common flag")
 
 
 _WF = None
@@ -364,11 +385,23 @@ def build_db(jmdict_json_bytes, vn_freq=None):
     print(f"  dict.sqlite built ({size_mb} MB)\n")
 
 
-def setup_dictionary(common, force=False, freq_zip=None, innocent=False):
+def setup_dictionary(common, force=False, freq_zip=None, innocent=False,
+                     no_vn_freq=False):
     print("[2/7] JMdict dictionary + frequency")
     if not force and os.path.isfile(DB_PATH):
         print("  dict.sqlite already present (use --force to rebuild)\n")
         return
+    setup_wordfreq()
+    # VN frequency source, best first: an explicit --freq zip, a jiten_vn.zip
+    # sitting in the folder (the recommended jiten.moe list — see README), and
+    # otherwise the auto-downloaded Innocent Corpus so a fresh install gets
+    # VN-flavoured ranking with zero manual steps. --no-vn-freq opts out.
+    if freq_zip is None and not innocent and not no_vn_freq:
+        local = os.path.join(BASE_DIR, "jiten_vn.zip")
+        if os.path.isfile(local):
+            freq_zip = local
+        else:
+            innocent = True
     vn_freq = None
     with tempfile.TemporaryDirectory() as tmp:
         if freq_zip:
@@ -380,6 +413,8 @@ def setup_dictionary(common, force=False, freq_zip=None, innocent=False):
                 print("  downloading VN/novel frequency (Innocent Corpus)...")
                 download(INNOCENT_URL, ic)
                 vn_freq = _load_vn_freq(ic)
+                print("  (tip: the jiten.moe VN list is finer — see README "
+                      "\"Visual-novel frequency ranking\")")
             except Exception as e:
                 print(f"  VN frequency unavailable ({e}); using general word frequency")
         name, url = find_jmdict_asset(common)
@@ -684,8 +719,10 @@ def main():
                     help="path to a Yomitan frequency dictionary .zip (e.g. the Visual "
                          "Novel list from jiten.moe) to drive lookup ranking")
     ap.add_argument("--innocent", action="store_true",
-                    help="auto-download the Innocent Corpus VN/novel frequency list "
-                         "(no manual step, but coarser than the jiten.moe VN list)")
+                    help="force the Innocent Corpus VN/novel frequency list (it is "
+                         "already the default when no --freq zip is given)")
+    ap.add_argument("--no-vn-freq", action="store_true",
+                    help="skip VN frequency entirely; rank by general word frequency")
     ap.add_argument("--no-textractor", action="store_true",
                     help="skip downloading Textractor (in-app game hooking)")
     ap.add_argument("--textractor", action="store_true",
@@ -702,10 +739,13 @@ def main():
     if args.agent:
         setup_agent(force=args.force)
         return
+    print("Downloads the tokenizer, dictionaries and the hooking engine, then\n"
+          "builds the lookup database. Roughly 250 MB of downloads, one time;\n"
+          "everything lands next to this script. Steps already done are skipped.\n")
     if not args.skip_kuromoji:
         setup_kuromoji(force=args.force)
     setup_dictionary(common=args.common, force=args.force, freq_zip=args.freq,
-                     innocent=args.innocent)
+                     innocent=args.innocent, no_vn_freq=args.no_vn_freq)
     setup_gloss_fts(force=args.force)
     if not args.no_names:
         setup_names(force=args.force)
@@ -713,7 +753,12 @@ def main():
     if not args.no_textractor:
         setup_textractor(force=args.force)
     setup_pywebview()
-    print("Done!  Start the app with:  python server.py")
+    if getattr(sys, "frozen", False):
+        print("Done!  Start the app with DownTheRabbitHole.exe")
+    else:
+        print("Done!  Start the app with run.bat  (or: python server.py)")
+    print("Optional extras: emulator hooking `setup.py --agent` (~120 MB), "
+          "better OCR `pip install manga-ocr` (~400 MB) — see README.")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,24 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-07-16, install redesign)
+
+Setup made one-step for new users. **First-run auto-setup**: server.py's
+missing-dict path now OFFERS to run setup itself (`_run_first_time_setup` —
+console prompt when a console exists; Yes/No MessageBox + setup in its own
+console window under pythonw / the frozen exe, which spawns
+RabbitHoleSetup.exe). run.bat runs setup.py first when dict.sqlite is missing,
+so "double-click run.bat" is the whole Python-path install. **VN frequency by
+default**: setup auto-uses jiten_vn.zip when present, else auto-downloads
+Innocent Corpus (--no-vn-freq opts out; --innocent now just forces what is
+already the default); wordfreq is pip-installed best-effort like pywebview
+always was. **Release workflow** (.github/workflows/release.yml): pushing a
+v* tag builds both exes with PyInstaller on windows-latest and attaches
+DownTheRabbitHole-win64.zip (+ README/LICENSE/START-HERE.txt) to the GitHub
+release — README's install section now leads with that no-Python path. All
+four _run_first_time_setup branches exercised (stub setup exe, patched
+GetConsoleWindow/MessageBoxW); the packaging pwsh step dry-run locally.
+
 ## Done (2026-07-16)
 
 Review sweep, all five findings: **LICENSE** (GPL-3.0 — deinflect_data.py is
