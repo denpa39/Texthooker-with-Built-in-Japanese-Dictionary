@@ -44,12 +44,13 @@ const SESSION_KEY = "vntex-session";
 let sessionChars = 0;    // characters read since this page loaded (drives 字/時)
 let sessionStart = 0;    // first line's timestamp this page-load
 let restoring = false;   // true while replaying saved lines (no save/stat churn)
+let bookMode = false;    // true while #lines shows an opened e-book, not the session
 
 function savedLines() {
   return [...linesEl.children].map(l => l.dataset.raw).filter(Boolean);
 }
 function saveSession() {
-  if (restoring) return;
+  if (restoring || bookMode) return;   // never overwrite the session with book text
   try { localStorage.setItem(SESSION_KEY, JSON.stringify(savedLines())); } catch (_) {}
 }
 const statsEl = document.getElementById("stats");
@@ -166,14 +167,21 @@ kuromoji.builder({ dicPath: "/static/kuromoji/dict" }).build((err, tk) => {
   rebuildSentences();
 });
 
-// Rebuild the tokenized text of every line in place.
+// Rebuild the tokenized text of lines in place. Only lines that already carry
+// a .sentence — book lines start as PLAIN text and tokenize lazily on scroll
+// (rebuilding a 10k-line novel here would freeze the tab); re-observing them
+// makes the visible ones tokenize now that the tokenizer exists.
 function rebuildSentences() {
-  document.querySelectorAll(".line[data-raw]").forEach(line => {
-    const sentence = line.querySelector(".sentence");
-    const rebuilt = buildSentence(line.dataset.raw);
-    if (sentence) sentence.replaceWith(rebuilt);
-    else line.insertBefore(rebuilt, line.firstChild);
+  document.querySelectorAll(".line[data-raw] .sentence").forEach(sentence => {
+    const line = sentence.closest(".line");
+    sentence.replaceWith(buildSentence(line.dataset.raw));
   });
+  if (bookMode) {
+    [...linesEl.children].forEach(l => {
+      if (!l.querySelector(".sentence")) { bookIO.unobserve(l); bookIO.observe(l); }
+    });
+    tokenizeAround(bookSt.pos);
+  }
 }
 
 /* ---- rendering --------------------------------------------------------- */
@@ -238,7 +246,9 @@ function mergeReads(a, b) {
   return null;
 }
 
-function addLine(text, isBook) {
+function addLine(text) {
+  if (bookMode) return;   // the reader is showing a book — session lines stay in
+                          // logs/ and localStorage-restore picks up after close
   text = (text || "").replace(/\r/g, "").trim();
   if (!text) return;
   // Reconcile with the previous line: OCR re-reads the same on-screen text as
@@ -246,13 +256,9 @@ function addLine(text, isBook) {
   // a frame late), the SSE stream replays the last line on reconnect, and NVL
   // games append to the same screen. If the new text merges with the last
   // line, swap the merged version in place instead of stacking a duplicate.
-  // Book lines skip the merge — consecutive book lines legitimately contain
-  // or overlap each other; only the reconnect replay (exact dup) is dropped.
   const last = linesEl.lastElementChild;
   let statsText = text;
-  if (last && isBook) {
-    if (last.dataset.raw === text) return;
-  } else if (last) {
+  if (last) {
     const merged = mergeReads(last.dataset.raw, text);
     if (merged === last.dataset.raw) return;   // nothing new (dup / shorter re-read)
     if (merged) {
@@ -1070,13 +1076,7 @@ function connectStream() {
     if (!pauseBtn.classList.contains("active")) setStatus("ready", "Ready");
   };
   es.onmessage = ev => {
-    try {
-      const d = JSON.parse(ev.data);
-      addLine(d.text, d.book);
-      // A book line while we think no book is open: another page (or device)
-      // imported/opened one — sync so the advance keys and Next work here too.
-      if (d.book && bookSt.total <= 0) refreshBook();
-    } catch (_) {}
+    try { addLine(JSON.parse(ev.data).text); } catch (_) {}
   };
   es.onerror = () => {
     if (!pauseBtn.classList.contains("active")) setStatus("connecting", "Disconnected — reconnecting…");
@@ -1296,6 +1296,7 @@ document.addEventListener("keydown", e => {
 
 // Remove only the most recent line (undo), and move the "latest" highlight back.
 document.getElementById("clearBtn").addEventListener("click", () => {
+  if (bookMode) return;   // a book isn't a session — nothing to undo
   const last = linesEl.lastElementChild;
   if (!last) return;
   if (!popup.classList.contains("hidden")) unpin();  // close any popup tied to it
@@ -1319,6 +1320,7 @@ function disarmClear() {
   clearAllBtn.title = "Clear all lines";
 }
 clearAllBtn.addEventListener("click", () => {
+  if (bookMode) return;   // clearing the reader would just wipe the book view
   if (!clearArmed) {                       // first click: arm + ask
     clearArmed = true;
     clearAllBtn.classList.add("confirm");
@@ -1343,6 +1345,7 @@ clearAllBtn.addEventListener("click", () => {
 // silently drops it — so the server does the saving for both window and browser.)
 const exportBtn = document.getElementById("exportBtn");
 exportBtn.addEventListener("click", async () => {
+  if (bookMode) return;   // the book already exists as a file — export is for sessions
   const lines = savedLines();
   if (!lines.length) return;
   try {
@@ -1357,16 +1360,129 @@ exportBtn.addEventListener("click", async () => {
   setTimeout(() => { exportBtn.textContent = "Export"; }, 2000);
 });
 
-/* ---- Book reader: import an .epub, advance line by line like a VN -------- */
+/* ---- Book reader: a real e-reader view --------------------------------- *
+ * Opening a book replaces the session view with the WHOLE book, scrollable.
+ * Lines render as plain text and tokenize lazily as they scroll into view
+ * (tokenizing a 10k-line novel up front would freeze the tab). The reading
+ * position = the line at the top of the viewport, saved (debounced) to the
+ * server as you scroll, restored on open. Session lines keep flowing into
+ * logs/ meanwhile and reappear when the book is closed.                     */
 const bookBtn = document.getElementById("bookBtn");
 const bookPanel = document.getElementById("bookPanel");
 const bookMsg = document.getElementById("bookMsg");
 const bookShelf = document.getElementById("bookShelf");
 const bookFile = document.getElementById("bookFile");
 const bookStop = document.getElementById("bookStop");
-const bookNextBtn = document.getElementById("bookNext");
 const BOOK_HINT = bookMsg.innerHTML;
 let bookSt = { total: 0, pos: 0, title: null, books: [] };
+
+// Lazy tokenization: a line tokenizes the first time it nears the viewport.
+function tokenizeBookLine(line) {
+  if (!tokenizer || line.querySelector(".sentence")) return;
+  line.textContent = "";
+  line.appendChild(buildSentence(line.dataset.raw));
+  bookIO.unobserve(line);
+}
+// …driven by an IntersectionObserver…
+const bookIO = new IntersectionObserver(entries => {
+  for (const en of entries)
+    if (en.isIntersecting) tokenizeBookLine(en.target);   // no tokenizer yet:
+}, { root: linesEl, rootMargin: "600px 600px" });         // rebuildSentences re-arms
+
+// …plus a direct pass around a position — IO delivery needs rendering frames,
+// which a backgrounded tab doesn't get; this keeps the dictionary alive there.
+function tokenizeAround(pos) {
+  const kids = linesEl.children;
+  for (let i = Math.max(0, pos - 5); i < Math.min(kids.length, pos + 40); i++)
+    tokenizeBookLine(kids[i]);
+}
+
+function enterBookView(lines, pos) {
+  bookMode = true;
+  bookIO.disconnect();
+  if (!popup.classList.contains("hidden")) unpin();
+  hint.classList.add("gone");
+  linesEl.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  for (const t of lines) {
+    const div = document.createElement("div");
+    div.className = "line";
+    div.dataset.raw = t;
+    div.textContent = t;
+    frag.appendChild(div);
+  }
+  linesEl.appendChild(frag);
+  [...linesEl.children].forEach(l => bookIO.observe(l));
+  bookScrollTo(pos);
+  tokenizeAround(pos);
+}
+
+function exitBookView() {
+  if (!bookMode) return;
+  bookMode = false;
+  bookIO.disconnect();
+  if (!popup.classList.contains("hidden")) unpin();
+  linesEl.innerHTML = "";
+  restoring = true;
+  try { (JSON.parse(localStorage.getItem(SESSION_KEY)) || []).forEach(addLine); } catch (_) {}
+  restoring = false;
+  hint.classList.toggle("gone", linesEl.children.length > 0);
+}
+
+function bookScrollTo(pos) {
+  const line = linesEl.children[Math.max(0, Math.min(pos, linesEl.children.length - 1))];
+  // block:"start" = top of the page in horizontal, right edge in vertical-rl —
+  // scrollIntoView is writing-mode aware.
+  if (line) line.scrollIntoView({ block: "start", inline: "start" });
+}
+
+// The line currently at the top (horizontal) / right (vertical) of the
+// viewport — binary search, the lines are in document order.
+function bookTopLine() {
+  const kids = linesEl.children;
+  if (!kids.length) return 0;
+  const vert = document.documentElement.classList.contains("vertical");
+  const cr = linesEl.getBoundingClientRect();
+  const started = i => {           // has line i reached the viewport's start edge?
+    const r = kids[i].getBoundingClientRect();
+    return vert ? r.left < cr.right - 1 : r.bottom > cr.top + 1;
+  };
+  let lo = 0, hi = kids.length - 1, ans = kids.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (started(mid)) { ans = mid; hi = mid - 1; } else lo = mid + 1;
+  }
+  return ans;
+}
+
+// Save the reading position as the user scrolls (debounced).
+let bookScrollTimer = null;
+linesEl.addEventListener("scroll", () => {
+  if (!bookMode) return;
+  clearTimeout(bookScrollTimer);
+  bookScrollTimer = setTimeout(async () => {
+    const pos = bookTopLine();
+    tokenizeAround(pos);
+    if (pos === bookSt.pos) return;
+    bookSt.pos = pos;
+    renderBookCounter();
+    try { await jpost("/book/pos", { pos }); } catch (_) {}
+  }, 400);
+});
+
+// Re-anchor on the current line when the vertical toggle flips the axes.
+document.addEventListener("vntex-vertical-toggle", () => {
+  if (bookMode) bookScrollTo(bookSt.pos);
+  else linesEl.scrollTo({ top: linesEl.scrollHeight, left: -linesEl.scrollWidth });
+});
+
+function renderBookCounter() {
+  const open = bookSt.total > 0;
+  bookBtn.title = open ? `Reading: ${bookSt.title} — line ${bookSt.pos + 1} of ${bookSt.total}`
+                       : "Import an e-book and read it here, with the hover dictionary";
+  if (open) bookMsg.textContent = `${bookSt.title} — line ${bookSt.pos + 1} / ${bookSt.total}`;
+  else bookMsg.innerHTML = BOOK_HINT;
+}
 
 function renderBook(st) {
   if (!st) return;
@@ -1374,13 +1490,8 @@ function renderBook(st) {
   bookSt = st;
   const open = st.total > 0;
   bookBtn.classList.toggle("active", open);
-  bookNextBtn.classList.toggle("hidden", !open);
   bookStop.classList.toggle("hidden", !open);
-  bookNextBtn.textContent = st.pos + 1 >= st.total ? "The End" : "Next ▸";
-  bookBtn.title = open ? `Reading: ${st.title} — line ${st.pos + 1} of ${st.total}`
-                       : "Import an .epub and read it line by line, like a visual novel";
-  if (open) bookMsg.textContent = `${st.title} — line ${st.pos + 1} / ${st.total}`;
-  else bookMsg.innerHTML = BOOK_HINT;
+  renderBookCounter();
   bookShelf.innerHTML = "";
   (st.books || []).forEach(b => {
     const btn = document.createElement("button");
@@ -1390,39 +1501,26 @@ function renderBook(st) {
     const at = document.createElement("span");
     at.textContent = b.name === st.name ? "reading now" : "at line " + (b.pos + 1);
     btn.append(name, at);
-    btn.addEventListener("click", async () => renderBook(await jpost("/book/open", { name: b.name })));
+    btn.addEventListener("click", () => openBook(b.name));
     bookShelf.appendChild(btn);
   });
+  // /book/open (and import) answer with the full text — enter the reader view.
+  if (st.lines) enterBookView(st.lines, st.pos);
+}
+
+async function openBook(name) {
+  bookMsg.textContent = "Opening…";
+  renderBook(await jpost("/book/open", { name }));
 }
 
 async function refreshBook() {
-  try { renderBook(await (await fetch("/book")).json()); } catch (_) {}
-}
-
-let bookBusy = false;
-async function bookStep(delta) {
-  if (bookBusy || bookSt.total <= 0) return;
-  bookBusy = true;
   try {
-    const prevPos = bookSt.pos;
-    const st = await jpost(delta > 0 ? "/book/next" : "/book/prev");
-    // Stepping back doesn't republish (the earlier line is still on screen) —
-    // it removes the newest line instead, like a VN backscroll.
-    if (delta < 0 && st.pos < prevPos) document.getElementById("clearBtn").click();
-    renderBook(st);
-  } finally { bookBusy = false; }
+    const st = await (await fetch("/book")).json();
+    // A book is open server-side (page reload mid-read): re-enter the reader.
+    if (st.total > 0 && st.name && !bookMode) openBook(st.name);
+    else renderBook(st);
+  } catch (_) {}
 }
-bookNextBtn.addEventListener("click", () => bookStep(1));
-document.addEventListener("keydown", e => {
-  if (bookSt.total <= 0) return;
-  if (e.target.matches("input, textarea, select")) return;
-  if (e.target.closest(".token.word")) return;   // Space there pins the popup
-  // Vertical (tategaki) reads right-to-left, so the arrows flip: ← advances.
-  const fwd = document.documentElement.classList.contains("vertical") ? "ArrowLeft" : "ArrowRight";
-  const back = fwd === "ArrowLeft" ? "ArrowRight" : "ArrowLeft";
-  if (e.key === " " || e.key === fwd) { e.preventDefault(); bookStep(1); }
-  else if (e.key === back) { e.preventDefault(); bookStep(-1); }
-});
 
 document.getElementById("bookImport").addEventListener("click", () => bookFile.click());
 bookFile.addEventListener("change", async () => {
@@ -1440,7 +1538,10 @@ bookFile.addEventListener("change", async () => {
     renderBook(await resp.json());
   } catch (e) { bookMsg.textContent = "Import failed: " + e.message; }
 });
-bookStop.addEventListener("click", async () => renderBook(await jpost("/book/close")));
+bookStop.addEventListener("click", async () => {
+  renderBook(await jpost("/book/close"));
+  exitBookView();
+});
 
 function toggleBookPanel(show) {
   const hidden = show === undefined ? !bookPanel.classList.contains("hidden") : !show;
@@ -1453,7 +1554,7 @@ document.addEventListener("click", e => {
   if (!bookPanel.classList.contains("hidden") && !bookPanel.contains(e.target) && e.target !== bookBtn)
     toggleBookPanel(false);
 });
-refreshBook();   // reflect an open book after a reload
+refreshBook();   // resume an open book after a reload
 
 /* ---- Study section of the settings panel (Anki deck) --------------------- */
 (function initStudyPanel() {

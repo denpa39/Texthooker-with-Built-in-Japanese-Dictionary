@@ -154,10 +154,9 @@
     if (vertToggle) vertToggle.addEventListener("click", () => {
       settings.vertical = !settings.vertical;
       commit();
-      // Jump to the newest line — the scroll axis just flipped, the old
-      // scroll offset points somewhere meaningless.
-      const lines = document.getElementById("lines");
-      if (lines) lines.scrollTo({ top: lines.scrollHeight, left: -lines.scrollWidth });
+      // The scroll axis just flipped and the old offset points somewhere
+      // meaningless — app.js re-anchors (newest line, or the book position).
+      document.dispatchEvent(new CustomEvent("vntex-vertical-toggle"));
     });
 
     // Text-size sliders: the toolbar's A slider AND the panel's "Text size" row

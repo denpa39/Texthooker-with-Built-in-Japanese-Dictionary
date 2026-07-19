@@ -172,17 +172,18 @@ entirely (general word frequency only).
   hooked game), so nothing is lost to a browser-storage wipe.
 - **Book reader** — the **Book** toolbar button imports an e-book (`.epub`, Kindle
   `.mobi`/`.azw`/`.azw3`, `.fb2`, `.txt` including Aozora Bunko markup with automatic
-  cp932 detection, or `.html`) and serves it one line at a time, like a visual novel:
-  **Space**/**→** shows the next line (a floating **Next ▸** button does the same on
-  phones), **←** steps back. Ruby furigana in the file is stripped so the reader's own
-  hover dictionary and furigana work on clean text. Imported books and your position
-  in each are remembered in `books/` across sessions. (DRM-protected Kindle books and
-  `.pdf` can't be read directly — convert to epub with
-  [Calibre](https://calibre-ebook.com/) first.)
+  cp932 detection, or `.html`) and opens it as a real scrollable e-reader: the whole
+  book in the reading pane, every word with the same hover dictionary and furigana
+  as game text (lines tokenize lazily as you scroll, so even a long novel opens
+  instantly). Your place — the line at the top of the screen — is saved as you
+  scroll and restored when you come back, per book, across sessions. Ruby furigana
+  in the file is stripped so the reader's own furigana doesn't double up. Ctrl+F
+  searches the whole book. (DRM-protected Kindle books and `.pdf` can't be read
+  directly — convert to epub with [Calibre](https://calibre-ebook.com/) first.)
 - **Vertical text (tategaki)** — the 縦 toggle in Settings flips the reader to
   right-to-left vertical columns, like a printed novel; furigana, the hover
-  dictionary and the book reader all follow (in vertical mode **←** advances the
-  book, matching the reading direction). Remembered like every other setting.
+  dictionary and the book reader all follow, and the book keeps your place when
+  you flip. Remembered like every other setting.
 - **WebSocket input** — reads text straight from Textractor's websocket plugin (:6677)
   or Agent (:9001) with no clipboard round-trip; `--ws` configures or disables it.
 - **LAN mode** — `python server.py --lan` prints a LAN URL so you can read along on a
@@ -214,7 +215,7 @@ entirely (general word frequency only).
 | status dot | Connection state at a glance — green = ready, orange = paused, red = disconnected (hover for the label) |
 | lookup box | Type a word + Enter (romaji or English OK) — dictionary popup without hooking |
 | **Attach** | Hook a running game directly (embedded Textractor) — pick the process, then the text channel |
-| **Book** | Import an e-book (`.epub` / `.mobi` / `.azw` / `.fb2` / `.txt` / `.html`) and read it line by line — Space/→ next, ← back; position remembered per book |
+| **Book** | Import an e-book (`.epub` / `.mobi` / `.azw` / `.fb2` / `.txt` / `.html`) — opens as a scrollable reader, place saved per book |
 | **Pause** / **Resume** | Stop/continue capture (clipboard + websocket) |
 | **Furigana** | Show readings above kanji |
 | ▤ alignment icons | Text alignment — left, center, right, or justify |

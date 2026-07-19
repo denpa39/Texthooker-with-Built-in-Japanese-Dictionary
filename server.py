@@ -151,27 +151,26 @@ def _log_line(text):
         pass
 
 
-def publish_line(text, book=False):
+def publish_line(text):
     """Single entry point for all text sources (clipboard + embedded Textractor +
-    websocket + book): clean the classic hook artifacts, drop consecutive repeats,
-    log to disk, broadcast. book=True tags the SSE event so the reader appends
-    the line verbatim instead of running its OCR re-read reconciliation —
-    consecutive book lines legitimately contain/overlap each other."""
+    websocket): clean the classic hook artifacts, drop consecutive repeats,
+    log to disk, broadcast."""
     text = clean_hook_text((text or "").strip())
     if not text or text == _last_published[0]:
         return
     _last_published[0] = text
     _log_line(text)
-    broadcaster.publish({"text": text, "book": True} if book else {"text": text})
+    broadcaster.publish({"text": text})
 
 
 hooker = hook.Hooker(publish_line)
 
 
 # --------------------------------------------------------------------------- #
-# Book reader (epub import) — parsed books persist in books/*.json so a novel
+# Book reader (e-book import) — parsed books persist in books/*.json so a novel
 # read over many sessions doesn't need re-importing; progress.json remembers
-# the position per book.
+# the top-of-viewport line per book. The client renders the whole book itself
+# (scrollable, like a real e-reader) — the server just stores text + position.
 # --------------------------------------------------------------------------- #
 _BOOK = {"name": None, "title": None, "lines": [], "pos": 0}
 _BOOK_LOCK = threading.Lock()
@@ -211,15 +210,6 @@ def book_state():
             "total": len(_BOOK["lines"]), "books": books}
 
 
-def _book_publish_current():
-    lines = _BOOK["lines"]
-    if 0 <= _BOOK["pos"] < len(lines):
-        # A book legitimately repeats lines back-to-back («……» twice) and
-        # revisits them via prev/next — defeat the consecutive-repeat dedupe.
-        _last_published[0] = None
-        publish_line(lines[_BOOK["pos"]], book=True)
-
-
 def book_import(data, filename):
     """Parse an uploaded e-book (epub/txt/html — book.parse_book dispatches on
     the extension), persist it, open it at the remembered position."""
@@ -235,28 +225,22 @@ def book_import(data, filename):
 
 
 def book_open(name):
+    """Load a book and return its FULL text (the client renders it all,
+    tokenizing lazily) plus the remembered reading position."""
     with open(os.path.join(BOOK_DIR, name + ".json"), encoding="utf-8") as f:
         data = json.load(f)
     with _BOOK_LOCK:
         _BOOK.update(name=name, title=data["title"], lines=data["lines"],
                      pos=min(_book_progress().get(name, 0), len(data["lines"]) - 1))
-        _book_publish_current()
-        return book_state()
+        return {**book_state(), "lines": _BOOK["lines"]}
 
 
-def book_step(delta):
+def book_set_pos(pos):
+    """Remember the top-of-viewport line — called (debounced) as the user scrolls."""
     with _BOOK_LOCK:
-        if not _BOOK["lines"]:
-            return book_state()
-        new = max(0, min(_BOOK["pos"] + delta, len(_BOOK["lines"]) - 1))
-        moved = new != _BOOK["pos"]
-        _BOOK["pos"] = new
-        if moved:
+        if _BOOK["lines"]:
+            _BOOK["pos"] = max(0, min(int(pos), len(_BOOK["lines"]) - 1))
             _book_save_pos()
-            if delta > 0:
-                # prev doesn't republish — the earlier line is still on screen;
-                # the client removes the newest one instead (VN backscroll).
-                _book_publish_current()
         return book_state()
 
 
@@ -1223,10 +1207,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(book_open(name))
             except (OSError, ValueError, KeyError):
                 self._send_json({"error": "book not found"}, 404)
-        elif parsed.path == "/book/next":
-            self._send_json(book_step(1))
-        elif parsed.path == "/book/prev":
-            self._send_json(book_step(-1))
+        elif parsed.path == "/book/pos":
+            try:
+                pos = int(self._read_json_body().get("pos"))
+            except (TypeError, ValueError):
+                self._send_json({"error": "bad pos"}, 400)
+                return
+            self._send_json(book_set_pos(pos))
         elif parsed.path == "/book/close":
             self._send_json(book_close())
         elif parsed.path == "/anki":

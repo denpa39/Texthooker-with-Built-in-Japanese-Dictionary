@@ -12,6 +12,20 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-07-19, fourth pass — reader rework)
+
+**Book mode is a real e-reader now, VN-style advance removed** (user: the
+line-at-a-time progress flow "fucked up the whole thing"). /book/open returns the
+book's full lines; app.js bookMode replaces the session view with the whole book,
+scrollable. Lines render plain and tokenize lazily near the viewport
+(IntersectionObserver + a direct tokenizeAround pass — IO needs rendering frames,
+backgrounded tabs get none). Reading position = top-of-viewport line, binary-search
+detected, debounce-saved to /book/pos, restored on open/reload; the vertical toggle
+re-anchors it (vntex-vertical-toggle event). Book text no longer goes through
+publish_line — nothing lands in SSE/logs/session; the session restores from
+localStorage on Close book; Undo/Clear/Export are no-ops in book mode. Removed:
+/book/next, /book/prev, the SSE book flag, advance keys, the floating Next button.
+
 ## Done (2026-07-19, third pass)
 
 **Kindle formats + katakana ranking.** Prompted by reading 星の王子さま: the user's

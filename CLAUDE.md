@@ -88,14 +88,15 @@ emulator (PPSSPP/PCSX2/Vita3K/yuzu…) ── Agent GUI (agent/, launched via /a
   `/audio` (JapanesePod101 word-audio proxy for the popup's ♪ — the service answers EVERY
   query with something, a missing word returns a fixed 52,288-byte "not available" clip
   that must 404, size gate in fetch_audio), `/book` `/book/import` `/book/open`
-  `/book/next` `/book/prev` `/book/close` (epub reading: import parses via book.py and
-  persists {title, lines} to books/<title>.json [gitignored] + per-book position in
-  books/progress.json, so a novel resumes across sessions; next publishes through
-  publish_line with book=True — tags the SSE event `book: true` so app.js appends
-  verbatim instead of running mergeReads reconciliation [consecutive book lines
-  legitimately contain each other] and resets the consecutive-repeat dedupe so
-  genuinely repeated lines still publish; prev does NOT republish — the client
-  removes the newest reader line instead, VN-backscroll style), `/qr` (PNG QR of LAN_URL else SERVER_URL —
+  `/book/pos` `/book/close` (e-book reader: import parses via book.py and persists
+  {title, lines} to books/<title>.json [gitignored] + per-book position in
+  books/progress.json; open returns the book's FULL lines array — the client renders
+  the whole book as a scrollable e-reader view [bookMode in app.js: replaces the
+  session view, lazy-tokenizes lines near the viewport via IntersectionObserver +
+  a direct tokenizeAround pass, saves the top-of-viewport line to /book/pos
+  debounced on scroll, restores the session from localStorage on close]; nothing
+  goes through publish_line — book text never touches SSE, logs/ or the session),
+  `/qr` (PNG QR of LAN_URL else SERVER_URL —
   qr.py: stdlib byte-mode QR, versions 1-5, EC L, mask 0; format-bit PLACEMENT is the trap,
   it's the transpose of the data orientation — test_qr.py's fixture was frozen after
   matching the `qrcode` reference lib module-for-module and decoding with jsQR),
@@ -229,7 +230,8 @@ emulator (PPSSPP/PCSX2/Vita3K/yuzu…) ── Agent GUI (agent/, launched via /a
   `#lines` to `writing-mode: vertical-rl` — `.line` uses LOGICAL props
   (`inline-size`/`max-inline-size`/`margin-inline`) so its sizing flips for free; app.js
   handles the flipped auto-scroll axis (Chrome's scrollLeft is NEGATIVE in vertical-rl,
-  newest line leftmost) and swaps the book-advance arrows (← = next when vertical).
+  newest line leftmost); toggling dispatches `vntex-vertical-toggle` and app.js
+  re-anchors the scroll (book position, or the newest session line).
   The Settings panel's "Read on your phone" QR row (index.html #lanRow) is populated by
   app.js from `/state`'s lan_url — hidden unless the server runs with --lan.
 - **LICENSE** — GPL-3.0 for the whole project (forced by the Yomitan-ported
