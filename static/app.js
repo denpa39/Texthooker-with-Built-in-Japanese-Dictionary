@@ -167,21 +167,13 @@ kuromoji.builder({ dicPath: "/static/kuromoji/dict" }).build((err, tk) => {
   rebuildSentences();
 });
 
-// Rebuild the tokenized text of lines in place. Only lines that already carry
-// a .sentence — book lines start as PLAIN text and tokenize lazily on scroll
-// (rebuilding a 10k-line novel here would freeze the tab); re-observing them
-// makes the visible ones tokenize now that the tokenizer exists.
+// Rebuild the tokenized text of every line in place. In book mode only the
+// current PAGE is in the DOM (~a few dozen lines), so this stays cheap.
 function rebuildSentences() {
   document.querySelectorAll(".line[data-raw] .sentence").forEach(sentence => {
     const line = sentence.closest(".line");
     sentence.replaceWith(buildSentence(line.dataset.raw));
   });
-  if (bookMode) {
-    [...linesEl.children].forEach(l => {
-      if (!l.querySelector(".sentence")) { bookIO.unobserve(l); bookIO.observe(l); }
-    });
-    tokenizeAround(bookSt.pos);
-  }
 }
 
 /* ---- rendering --------------------------------------------------------- */
@@ -1360,67 +1352,108 @@ exportBtn.addEventListener("click", async () => {
   setTimeout(() => { exportBtn.textContent = "Export"; }, 2000);
 });
 
-/* ---- Book reader: a real e-reader view --------------------------------- *
- * Opening a book replaces the session view with the WHOLE book, scrollable.
- * Lines render as plain text and tokenize lazily as they scroll into view
- * (tokenizing a 10k-line novel up front would freeze the tab). The reading
- * position = the line at the top of the viewport, saved (debounced) to the
- * server as you scroll, restored on open. Session lines keep flowing into
- * logs/ meanwhile and reappear when the book is closed.                     */
+/* ---- Book reader: paged, like a Kindle ---------------------------------- *
+ * Opening a book replaces the session view with one PAGE of it: lines are
+ * appended until the pane overflows, the overflowing line is pushed to the
+ * next page. Click the far side of the page / arrow keys / Space / wheel to
+ * turn; the far-back side turns back. The page always starts at bookSt.pos
+ * (the first visible line), which is what gets saved per turn and restored
+ * on open — resize just re-fills the page from the same line. Only the
+ * current page exists in the DOM, so tokenization is simply "tokenize the
+ * page" — no lazy machinery. Session lines keep flowing into logs/
+ * meanwhile and reappear when the book is closed.                           */
 const bookBtn = document.getElementById("bookBtn");
 const bookPanel = document.getElementById("bookPanel");
 const bookMsg = document.getElementById("bookMsg");
 const bookShelf = document.getElementById("bookShelf");
 const bookFile = document.getElementById("bookFile");
 const bookStop = document.getElementById("bookStop");
+const bookFooter = document.getElementById("bookFooter");
 const BOOK_HINT = bookMsg.innerHTML;
 let bookSt = { total: 0, pos: 0, title: null, books: [] };
+let bookLines = [];      // full text, client-side, while a book is open
+let bookPageEnd = 0;     // index one past the last line on the current page
 
-// Lazy tokenization: a line tokenizes the first time it nears the viewport.
-function tokenizeBookLine(line) {
-  if (!tokenizer || line.querySelector(".sentence")) return;
-  line.textContent = "";
-  line.appendChild(buildSentence(line.dataset.raw));
-  bookIO.unobserve(line);
+const isVertical = () => document.documentElement.classList.contains("vertical");
+
+function makeBookLine(text) {
+  const div = document.createElement("div");
+  div.className = "line";
+  div.dataset.raw = text;
+  div.appendChild(buildSentence(text));   // plain until kuromoji loads;
+  return div;                             // rebuildSentences upgrades in place
 }
-// …driven by an IntersectionObserver…
-const bookIO = new IntersectionObserver(entries => {
-  for (const en of entries)
-    if (en.isIntersecting) tokenizeBookLine(en.target);   // no tokenizer yet:
-}, { root: linesEl, rootMargin: "600px 600px" });         // rebuildSentences re-arms
 
-// …plus a direct pass around a position — IO delivery needs rendering frames,
-// which a backgrounded tab doesn't get; this keeps the dictionary alive there.
-function tokenizeAround(pos) {
-  const kids = linesEl.children;
-  for (let i = Math.max(0, pos - 5); i < Math.min(kids.length, pos + 40); i++)
-    tokenizeBookLine(kids[i]);
+// Fill the pane starting at `pos` until it overflows; the overflowing line
+// goes to the next page (a single line taller than the pane gets a page of
+// its own and is clipped — Kindle splits paragraphs, we don't).
+function renderBookPage(pos) {
+  pos = Math.max(0, Math.min(pos, bookLines.length - 1));
+  if (!popup.classList.contains("hidden")) unpin();
+  linesEl.innerHTML = "";
+  const overflows = () => isVertical()
+    ? linesEl.scrollWidth > linesEl.clientWidth
+    : linesEl.scrollHeight > linesEl.clientHeight;
+  let end = pos;
+  while (end < bookLines.length) {
+    const div = makeBookLine(bookLines[end]);
+    linesEl.appendChild(div);
+    if (overflows()) {
+      if (linesEl.children.length > 1) div.remove();
+      else end++;                        // one giant line: its own page
+      break;
+    }
+    end++;
+  }
+  bookPageEnd = end;
+  bookSt.pos = pos;
+  renderBookCounter();
+}
+
+// A page turn is the only thing that moves the reading position.
+async function bookTurn(dir) {
+  if (!bookMode) return;
+  if (dir > 0) {
+    if (bookPageEnd >= bookLines.length) return;         // at the end
+    renderBookPage(bookPageEnd);
+  } else {
+    if (bookSt.pos <= 0) return;                         // at the start
+    // Fill BACKWARD from the current page's first line to find where the
+    // previous page must start so that it ends right where this one began.
+    const target = bookSt.pos;
+    let start = target - 1;
+    linesEl.innerHTML = "";
+    const overflows = () => isVertical()
+      ? linesEl.scrollWidth > linesEl.clientWidth
+      : linesEl.scrollHeight > linesEl.clientHeight;
+    while (start >= 0) {
+      linesEl.insertBefore(makeBookLine(bookLines[start]), linesEl.firstChild);
+      if (overflows()) {
+        if (linesEl.children.length > 1) { linesEl.firstChild.remove(); start++; }
+        break;
+      }
+      start--;
+    }
+    renderBookPage(Math.max(0, Math.min(start, target - 1)));
+  }
+  try { await jpost("/book/pos", { pos: bookSt.pos }); } catch (_) {}
 }
 
 function enterBookView(lines, pos) {
   bookMode = true;
-  bookIO.disconnect();
-  if (!popup.classList.contains("hidden")) unpin();
+  bookLines = lines;
   hint.classList.add("gone");
-  linesEl.innerHTML = "";
-  const frag = document.createDocumentFragment();
-  for (const t of lines) {
-    const div = document.createElement("div");
-    div.className = "line";
-    div.dataset.raw = t;
-    div.textContent = t;
-    frag.appendChild(div);
-  }
-  linesEl.appendChild(frag);
-  [...linesEl.children].forEach(l => bookIO.observe(l));
-  bookScrollTo(pos);
-  tokenizeAround(pos);
+  linesEl.classList.add("paged");
+  bookFooter.classList.remove("hidden");
+  renderBookPage(pos);
 }
 
 function exitBookView() {
   if (!bookMode) return;
   bookMode = false;
-  bookIO.disconnect();
+  bookLines = [];
+  linesEl.classList.remove("paged");
+  bookFooter.classList.add("hidden");
   if (!popup.classList.contains("hidden")) unpin();
   linesEl.innerHTML = "";
   restoring = true;
@@ -1429,50 +1462,49 @@ function exitBookView() {
   hint.classList.toggle("gone", linesEl.children.length > 0);
 }
 
-function bookScrollTo(pos) {
-  const line = linesEl.children[Math.max(0, Math.min(pos, linesEl.children.length - 1))];
-  // block:"start" = top of the page in horizontal, right edge in vertical-rl —
-  // scrollIntoView is writing-mode aware.
-  if (line) line.scrollIntoView({ block: "start", inline: "start" });
-}
-
-// The line currently at the top (horizontal) / right (vertical) of the
-// viewport — binary search, the lines are in document order.
-function bookTopLine() {
-  const kids = linesEl.children;
-  if (!kids.length) return 0;
-  const vert = document.documentElement.classList.contains("vertical");
-  const cr = linesEl.getBoundingClientRect();
-  const started = i => {           // has line i reached the viewport's start edge?
-    const r = kids[i].getBoundingClientRect();
-    return vert ? r.left < cr.right - 1 : r.bottom > cr.top + 1;
-  };
-  let lo = 0, hi = kids.length - 1, ans = kids.length - 1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (started(mid)) { ans = mid; hi = mid - 1; } else lo = mid + 1;
-  }
-  return ans;
-}
-
-// Save the reading position as the user scrolls (debounced).
-let bookScrollTimer = null;
-linesEl.addEventListener("scroll", () => {
-  if (!bookMode) return;
-  clearTimeout(bookScrollTimer);
-  bookScrollTimer = setTimeout(async () => {
-    const pos = bookTopLine();
-    tokenizeAround(pos);
-    if (pos === bookSt.pos) return;
-    bookSt.pos = pos;
-    renderBookCounter();
-    try { await jpost("/book/pos", { pos }); } catch (_) {}
-  }, 400);
+/* page-turn inputs: click the far side of the page (Kindle tap zones),
+ * arrows / Space / PageUp / PageDown, or the mouse wheel. In vertical
+ * (tategaki) the reading direction is right-to-left, so the zones and
+ * arrows flip. */
+linesEl.addEventListener("click", e => {
+  if (!bookMode || pinned) return;
+  if (e.target.closest(".token.word")) return;     // that click is a dictionary pin
+  const r = linesEl.getBoundingClientRect();
+  const frac = (e.clientX - r.left) / r.width;
+  if (frac > 0.6) bookTurn(isVertical() ? -1 : 1);
+  else if (frac < 0.4) bookTurn(isVertical() ? 1 : -1);
 });
+document.addEventListener("keydown", e => {
+  if (!bookMode) return;
+  if (e.target.matches("input, textarea, select")) return;
+  if (e.target.closest(".token.word") && (e.key === " " || e.key === "Enter")) return;
+  const fwd = isVertical() ? "ArrowLeft" : "ArrowRight";
+  const back = isVertical() ? "ArrowRight" : "ArrowLeft";
+  if (e.key === fwd || e.key === "PageDown" || (e.key === " " && !e.shiftKey) || e.key === "ArrowDown") {
+    e.preventDefault(); bookTurn(1);
+  } else if (e.key === back || e.key === "PageUp" || (e.key === " " && e.shiftKey) || e.key === "ArrowUp") {
+    e.preventDefault(); bookTurn(-1);
+  }
+});
+let bookWheelAt = 0;
+linesEl.addEventListener("wheel", e => {
+  if (!bookMode) return;
+  e.preventDefault();
+  const now = Date.now();
+  if (now - bookWheelAt < 250) return;   // one page per flick, not per notch
+  bookWheelAt = now;
+  bookTurn(e.deltaY > 0 || e.deltaX > 0 ? 1 : -1);
+}, { passive: false });
 
-// Re-anchor on the current line when the vertical toggle flips the axes.
+// Re-fill the page when the pane geometry changes.
+let bookResizeTimer = null;
+window.addEventListener("resize", () => {
+  if (!bookMode) return;
+  clearTimeout(bookResizeTimer);
+  bookResizeTimer = setTimeout(() => renderBookPage(bookSt.pos), 150);
+});
 document.addEventListener("vntex-vertical-toggle", () => {
-  if (bookMode) bookScrollTo(bookSt.pos);
+  if (bookMode) renderBookPage(bookSt.pos);
   else linesEl.scrollTo({ top: linesEl.scrollHeight, left: -linesEl.scrollWidth });
 });
 
@@ -1480,8 +1512,13 @@ function renderBookCounter() {
   const open = bookSt.total > 0;
   bookBtn.title = open ? `Reading: ${bookSt.title} — line ${bookSt.pos + 1} of ${bookSt.total}`
                        : "Import an e-book and read it here, with the hover dictionary";
-  if (open) bookMsg.textContent = `${bookSt.title} — line ${bookSt.pos + 1} / ${bookSt.total}`;
-  else bookMsg.innerHTML = BOOK_HINT;
+  if (open) {
+    const pct = Math.round(Math.min(bookPageEnd, bookSt.total) / bookSt.total * 100);
+    bookMsg.textContent = `${bookSt.title} — line ${bookSt.pos + 1} / ${bookSt.total} · ${pct}%`;
+    bookFooter.textContent = `${bookSt.title} · ${pct}%`;
+  } else {
+    bookMsg.innerHTML = BOOK_HINT;
+  }
 }
 
 function renderBook(st) {

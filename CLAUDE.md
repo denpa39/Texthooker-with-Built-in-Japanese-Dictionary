@@ -90,12 +90,14 @@ emulator (PPSSPP/PCSX2/Vita3K/yuzu…) ── Agent GUI (agent/, launched via /a
   that must 404, size gate in fetch_audio), `/book` `/book/import` `/book/open`
   `/book/pos` `/book/close` (e-book reader: import parses via book.py and persists
   {title, lines} to books/<title>.json [gitignored] + per-book position in
-  books/progress.json; open returns the book's FULL lines array — the client renders
-  the whole book as a scrollable e-reader view [bookMode in app.js: replaces the
-  session view, lazy-tokenizes lines near the viewport via IntersectionObserver +
-  a direct tokenizeAround pass, saves the top-of-viewport line to /book/pos
-  debounced on scroll, restores the session from localStorage on close]; nothing
-  goes through publish_line — book text never touches SSE, logs/ or the session),
+  books/progress.json; open returns the book's FULL lines array — the client shows
+  it PAGED, Kindle-style [bookMode in app.js: one page in the DOM at a time,
+  renderBookPage fills the pane line-by-line until it overflows, bookTurn flips
+  whole pages via edge clicks / arrows / Space / PageUp+Down / wheel, zones and
+  arrows flip in vertical mode; pos = the page's first line, saved to /book/pos
+  per turn; resize + vertical toggle re-fill from the same pos; footer pill shows
+  title + percent; session restores from localStorage on close]; nothing goes
+  through publish_line — book text never touches SSE, logs/ or the session),
   `/qr` (PNG QR of LAN_URL else SERVER_URL —
   qr.py: stdlib byte-mode QR, versions 1-5, EC L, mask 0; format-bit PLACEMENT is the trap,
   it's the transpose of the data orientation — test_qr.py's fixture was frozen after

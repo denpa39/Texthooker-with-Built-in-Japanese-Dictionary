@@ -12,6 +12,21 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-07-19, fifth pass — Kindle-style pages)
+
+**Book mode paginates now** ("just copy kindle atp"). One page in the DOM at a
+time: renderBookPage appends lines until the pane overflows (overflowing line →
+next page; a single line taller than the pane gets its own clipped page),
+bookTurn(±1) flips — backward fill computes where the previous page must start.
+Inputs: click far side of the page (Kindle tap zones, near side goes back),
+arrows / Space / Shift+Space / PageUp+Down / ArrowUp+Down, wheel (250ms
+throttle); all flip direction in vertical mode. pos = first line of the page,
+saved to /book/pos on every turn. Resize and the vertical toggle re-fill from
+the same pos. Glass footer pill: title · percent. Lazy-tokenization machinery
+(IntersectionObserver + tokenizeAround) deleted — a page is ~10-30 lines,
+tokenized synchronously at build. Ctrl+F now only sees the current page (logs
+button still searches everything) — acceptable trade.
+
 ## Done (2026-07-19, fourth pass — reader rework)
 
 **Book mode is a real e-reader now, VN-style advance removed** (user: the
