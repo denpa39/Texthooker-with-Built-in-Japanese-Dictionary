@@ -18,6 +18,7 @@
   <input id="lookupBox" type="search" lang="ja" placeholder="lookup…" aria-label="Manual dictionary lookup"
          title="Type a word and press Enter — romaji and English both work (English searches the definitions)">
   <button id="attachBtn" title="Attach to a game — embedded Textractor, no clipboard needed">Attach</button>
+  <button id="bookBtn" title="Import an .epub and read it line by line, like a visual novel">Book</button>
   <button id="pauseBtn" title="Pause / resume clipboard capture">Pause</button>
   <button id="furiBtn" title="Toggle furigana readings">Furigana</button>
   <div id="alignSeg" class="seg" role="group" aria-label="Text alignment">
@@ -93,6 +94,17 @@
   </div>
 </aside>
 
+<aside id="bookPanel" class="settings hidden" aria-label="Book reader">
+  <div class="set-head"><b>Book</b><button id="bookClose" class="set-x" title="close">×</button></div>
+  <div id="bookMsg" class="hook-msg">Import an .epub and read it one line at a time —
+    <b>Space</b> or <b>→</b> shows the next line, <b>←</b> steps back. Every word gets
+    the same hover dictionary as game text.</div>
+  <button id="bookImport" class="set-reset" title="Pick an .epub file from this PC">Import .epub…</button>
+  <input id="bookFile" type="file" accept=".epub" hidden>
+  <div id="bookShelf" class="proc-list"></div>
+  <button id="bookStop" class="set-reset hidden" title="Stop reading — position is remembered">Close book</button>
+</aside>
+
 <div id="findBar" class="findbar hidden" role="search" aria-label="Find in session lines">
   <input id="findInput" type="search" lang="ja" placeholder="find in lines…" aria-label="Find in session lines">
   <span id="findCount" class="find-count" aria-live="polite"></span>
@@ -105,6 +117,8 @@
 <main id="lines" lang="ja"></main>
 
 <div id="popup" class="popup hidden" role="dialog" aria-label="Dictionary entry"></div>
+
+<button id="bookNext" class="book-next hidden" title="Next line (Space / →)" aria-label="Next book line">Next ▸</button>
 
 <div id="hint" class="hint">
   Click <b>Attach</b> to hook a running game (or just copy Japanese text) and it appears

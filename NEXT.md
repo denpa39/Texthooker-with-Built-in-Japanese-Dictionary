@@ -12,6 +12,18 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-07-19)
+
+**Book reader (epub import)**: `book.py` (stdlib zip+OPF spine+html.parser, drops
+`<rt>/<rp>` furigana), `/book*` routes in server.py, Book toolbar button + panel +
+floating Next ▸ in the UI. Lines feed through publish_line (tagged `book: true` on
+SSE so the reader appends verbatim instead of OCR-merge-reconciling); Space/→
+advance, ← backscroll (client removes newest line); parsed books + per-book
+position persist in `books/` (gitignored). `test_book.py` in CI. Also fixed a
+latent keep-alive bug found doing this: POST routes that never read their request
+body left it on the socket and every following request on that connection got 501
+— do_POST now drains the body before routing.
+
 ## Done (2026-07-16, install redesign)
 
 Setup made one-step for new users. **First-run auto-setup**: server.py's

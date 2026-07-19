@@ -238,7 +238,7 @@ function mergeReads(a, b) {
   return null;
 }
 
-function addLine(text) {
+function addLine(text, isBook) {
   text = (text || "").replace(/\r/g, "").trim();
   if (!text) return;
   // Reconcile with the previous line: OCR re-reads the same on-screen text as
@@ -246,9 +246,13 @@ function addLine(text) {
   // a frame late), the SSE stream replays the last line on reconnect, and NVL
   // games append to the same screen. If the new text merges with the last
   // line, swap the merged version in place instead of stacking a duplicate.
+  // Book lines skip the merge — consecutive book lines legitimately contain
+  // or overlap each other; only the reconnect replay (exact dup) is dropped.
   const last = linesEl.lastElementChild;
   let statsText = text;
-  if (last) {
+  if (last && isBook) {
+    if (last.dataset.raw === text) return;
+  } else if (last) {
     const merged = mergeReads(last.dataset.raw, text);
     if (merged === last.dataset.raw) return;   // nothing new (dup / shorter re-read)
     if (merged) {
@@ -1059,7 +1063,10 @@ function connectStream() {
     if (!pauseBtn.classList.contains("active")) setStatus("ready", "Ready");
   };
   es.onmessage = ev => {
-    try { addLine(JSON.parse(ev.data).text); } catch (_) {}
+    try {
+      const d = JSON.parse(ev.data);
+      addLine(d.text, d.book);
+    } catch (_) {}
   };
   es.onerror = () => {
     if (!pauseBtn.classList.contains("active")) setStatus("connecting", "Disconnected — reconnecting…");
@@ -1339,6 +1346,101 @@ exportBtn.addEventListener("click", async () => {
   }
   setTimeout(() => { exportBtn.textContent = "Export"; }, 2000);
 });
+
+/* ---- Book reader: import an .epub, advance line by line like a VN -------- */
+const bookBtn = document.getElementById("bookBtn");
+const bookPanel = document.getElementById("bookPanel");
+const bookMsg = document.getElementById("bookMsg");
+const bookShelf = document.getElementById("bookShelf");
+const bookFile = document.getElementById("bookFile");
+const bookStop = document.getElementById("bookStop");
+const bookNextBtn = document.getElementById("bookNext");
+const BOOK_HINT = bookMsg.innerHTML;
+let bookSt = { total: 0, pos: 0, title: null, books: [] };
+
+function renderBook(st) {
+  if (!st) return;
+  if (st.error) { bookMsg.textContent = st.error; return; }
+  bookSt = st;
+  const open = st.total > 0;
+  bookBtn.classList.toggle("active", open);
+  bookNextBtn.classList.toggle("hidden", !open);
+  bookStop.classList.toggle("hidden", !open);
+  bookNextBtn.textContent = st.pos + 1 >= st.total ? "The End" : "Next ▸";
+  bookBtn.title = open ? `Reading: ${st.title} — line ${st.pos + 1} of ${st.total}`
+                       : "Import an .epub and read it line by line, like a visual novel";
+  if (open) bookMsg.textContent = `${st.title} — line ${st.pos + 1} / ${st.total}`;
+  else bookMsg.innerHTML = BOOK_HINT;
+  bookShelf.innerHTML = "";
+  (st.books || []).forEach(b => {
+    const btn = document.createElement("button");
+    btn.className = "proc-item";
+    const name = document.createElement("b");
+    name.textContent = b.name;
+    const at = document.createElement("span");
+    at.textContent = b.name === st.name ? "reading now" : "at line " + (b.pos + 1);
+    btn.append(name, at);
+    btn.addEventListener("click", async () => renderBook(await jpost("/book/open", { name: b.name })));
+    bookShelf.appendChild(btn);
+  });
+}
+
+async function refreshBook() {
+  try { renderBook(await (await fetch("/book")).json()); } catch (_) {}
+}
+
+let bookBusy = false;
+async function bookStep(delta) {
+  if (bookBusy || bookSt.total <= 0) return;
+  bookBusy = true;
+  try {
+    const prevPos = bookSt.pos;
+    const st = await jpost(delta > 0 ? "/book/next" : "/book/prev");
+    // Stepping back doesn't republish (the earlier line is still on screen) —
+    // it removes the newest line instead, like a VN backscroll.
+    if (delta < 0 && st.pos < prevPos) document.getElementById("clearBtn").click();
+    renderBook(st);
+  } finally { bookBusy = false; }
+}
+bookNextBtn.addEventListener("click", () => bookStep(1));
+document.addEventListener("keydown", e => {
+  if (bookSt.total <= 0) return;
+  if (e.target.matches("input, textarea, select")) return;
+  if (e.target.closest(".token.word")) return;   // Space there pins the popup
+  if (e.key === " " || e.key === "ArrowRight") { e.preventDefault(); bookStep(1); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); bookStep(-1); }
+});
+
+document.getElementById("bookImport").addEventListener("click", () => bookFile.click());
+bookFile.addEventListener("change", async () => {
+  const f = bookFile.files[0];
+  bookFile.value = "";
+  if (!f) return;
+  bookMsg.textContent = "Importing…";
+  try {
+    const resp = await fetch("/book/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream",
+                 "X-Book-Name": encodeURIComponent(f.name) },
+      body: await f.arrayBuffer(),
+    });
+    renderBook(await resp.json());
+  } catch (e) { bookMsg.textContent = "Import failed: " + e.message; }
+});
+bookStop.addEventListener("click", async () => renderBook(await jpost("/book/close")));
+
+function toggleBookPanel(show) {
+  const hidden = show === undefined ? !bookPanel.classList.contains("hidden") : !show;
+  bookPanel.classList.toggle("hidden", hidden);
+  if (!hidden) refreshBook();
+}
+bookBtn.addEventListener("click", e => { e.stopPropagation(); toggleBookPanel(); });
+document.getElementById("bookClose").addEventListener("click", () => toggleBookPanel(false));
+document.addEventListener("click", e => {
+  if (!bookPanel.classList.contains("hidden") && !bookPanel.contains(e.target) && e.target !== bookBtn)
+    toggleBookPanel(false);
+});
+refreshBook();   // reflect an open book after a reload
 
 /* ---- Study section of the settings panel (Anki deck) --------------------- */
 (function initStudyPanel() {

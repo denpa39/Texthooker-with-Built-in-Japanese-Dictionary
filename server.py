@@ -31,8 +31,9 @@ import urllib.request
 import webbrowser
 from ctypes import wintypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs, urlencode, urlsplit
+from urllib.parse import urlparse, parse_qs, urlencode, urlsplit, unquote
 
+import book
 import deinflect
 import hook
 import ocr
@@ -46,6 +47,7 @@ DB_PATH = os.path.join(BASE_DIR, "dict.sqlite")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 AGENT_DIR = os.path.join(BASE_DIR, "agent")
 AGENT_EXE = os.path.join(AGENT_DIR, "agent.exe")
+BOOK_DIR = os.path.join(BASE_DIR, "books")
 
 # --------------------------------------------------------------------------- #
 # Windows clipboard reader (ctypes, no dependencies)
@@ -117,13 +119,14 @@ class Broadcaster:
         with self._lock:
             self._subs.discard(q)
 
-    def publish(self, text):
-        self.last_text = text
+    def publish(self, payload):
+        # payload is the SSE-ready dict: {"text": ..., "book": True?}
+        self.last_text = payload
         with self._lock:
             subs = list(self._subs)
         for q in subs:
             try:
-                q.put_nowait(text)
+                q.put_nowait(payload)
             except queue.Full:
                 pass
 
@@ -148,19 +151,118 @@ def _log_line(text):
         pass
 
 
-def publish_line(text):
+def publish_line(text, book=False):
     """Single entry point for all text sources (clipboard + embedded Textractor +
-    websocket): clean the classic hook artifacts, drop consecutive repeats,
-    log to disk, broadcast."""
+    websocket + book): clean the classic hook artifacts, drop consecutive repeats,
+    log to disk, broadcast. book=True tags the SSE event so the reader appends
+    the line verbatim instead of running its OCR re-read reconciliation —
+    consecutive book lines legitimately contain/overlap each other."""
     text = clean_hook_text((text or "").strip())
     if not text or text == _last_published[0]:
         return
     _last_published[0] = text
     _log_line(text)
-    broadcaster.publish(text)
+    broadcaster.publish({"text": text, "book": True} if book else {"text": text})
 
 
 hooker = hook.Hooker(publish_line)
+
+
+# --------------------------------------------------------------------------- #
+# Book reader (epub import) — parsed books persist in books/*.json so a novel
+# read over many sessions doesn't need re-importing; progress.json remembers
+# the position per book.
+# --------------------------------------------------------------------------- #
+_BOOK = {"name": None, "title": None, "lines": [], "pos": 0}
+_BOOK_LOCK = threading.Lock()
+_PROGRESS_PATH = os.path.join(BOOK_DIR, "progress.json")
+
+
+def _book_progress():
+    try:
+        with open(_PROGRESS_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _book_save_pos():
+    prog = _book_progress()
+    prog[_BOOK["name"]] = _BOOK["pos"]
+    try:
+        os.makedirs(BOOK_DIR, exist_ok=True)
+        with open(_PROGRESS_PATH, "w", encoding="utf-8") as f:
+            json.dump(prog, f, ensure_ascii=False)
+    except OSError:
+        pass
+
+
+def book_state():
+    prog = _book_progress()
+    books = []
+    try:
+        for fn in sorted(os.listdir(BOOK_DIR)):
+            if fn.endswith(".json") and fn != "progress.json":
+                name = fn[:-5]
+                books.append({"name": name, "pos": prog.get(name, 0)})
+    except OSError:
+        pass
+    return {"title": _BOOK["title"], "name": _BOOK["name"], "pos": _BOOK["pos"],
+            "total": len(_BOOK["lines"]), "books": books}
+
+
+def _book_publish_current():
+    lines = _BOOK["lines"]
+    if 0 <= _BOOK["pos"] < len(lines):
+        # A book legitimately repeats lines back-to-back («……» twice) and
+        # revisits them via prev/next — defeat the consecutive-repeat dedupe.
+        _last_published[0] = None
+        publish_line(lines[_BOOK["pos"]], book=True)
+
+
+def book_import(data, fallback_name):
+    """Parse an uploaded epub, persist it, open it at the remembered position."""
+    title, lines = book.parse_epub(data)          # raises ValueError
+    if not lines:
+        raise ValueError("no text found in this epub")
+    title = title or fallback_name or "untitled"
+    safe = "".join(ch for ch in title if ch not in '\\/:*?"<>|').strip() or "untitled"
+    os.makedirs(BOOK_DIR, exist_ok=True)
+    with open(os.path.join(BOOK_DIR, safe + ".json"), "w", encoding="utf-8") as f:
+        json.dump({"title": title, "lines": lines}, f, ensure_ascii=False)
+    return book_open(safe)
+
+
+def book_open(name):
+    with open(os.path.join(BOOK_DIR, name + ".json"), encoding="utf-8") as f:
+        data = json.load(f)
+    with _BOOK_LOCK:
+        _BOOK.update(name=name, title=data["title"], lines=data["lines"],
+                     pos=min(_book_progress().get(name, 0), len(data["lines"]) - 1))
+        _book_publish_current()
+        return book_state()
+
+
+def book_step(delta):
+    with _BOOK_LOCK:
+        if not _BOOK["lines"]:
+            return book_state()
+        new = max(0, min(_BOOK["pos"] + delta, len(_BOOK["lines"]) - 1))
+        moved = new != _BOOK["pos"]
+        _BOOK["pos"] = new
+        if moved:
+            _book_save_pos()
+            if delta > 0:
+                # prev doesn't republish — the earlier line is still on screen;
+                # the client removes the newest one instead (VN backscroll).
+                _book_publish_current()
+        return book_state()
+
+
+def book_close():
+    with _BOOK_LOCK:
+        _BOOK.update(name=None, title=None, lines=[], pos=0)
+    return book_state()
 
 
 def clean_hook_text(text):
@@ -1007,6 +1109,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(ocr_source.state())
         elif path == "/agent":
             self._send_json(agent_state())
+        elif path == "/book":
+            self._send_json(book_state())
         elif path == "/snap":
             # Whole-game-window screenshot for Anki cards (base64 PNG). Finds
             # the window via the OCR region or the hooked pid; null otherwise.
@@ -1024,14 +1128,18 @@ class Handler(BaseHTTPRequestHandler):
             self._send_bytes(b"Not found", "text/plain; charset=utf-8", 404)
 
     def _read_json_body(self):
-        length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(length) if length else b"{}"
         try:
-            return json.loads(raw or b"{}")
+            return json.loads(self._post_body or b"{}")
         except Exception:
             return {}
 
     def do_POST(self):
+        # Drain the body up front, whether the route wants it or not: on a
+        # keep-alive (HTTP/1.1) connection an unread body is parsed as the
+        # NEXT request's method line — every request after a body-less POST
+        # route came back 501.
+        length = int(self.headers.get("Content-Length", 0))
+        self._post_body = self.rfile.read(length) if length else b""
         if not request_allowed(self.headers):
             self._send_json({"error": "forbidden origin"}, 403)
             return
@@ -1073,14 +1181,34 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/agent/start":
             err = agent_launch()
             self._send_json({"error": err, **agent_state()}, 400 if err else 200)
+        elif parsed.path == "/book/import":
+            fname = unquote(self.headers.get("X-Book-Name", ""))
+            fname = os.path.splitext(os.path.basename(fname))[0]
+            try:
+                self._send_json(book_import(self._post_body, fname))
+            except (ValueError, OSError) as e:
+                self._send_json({"error": str(e)}, 400)
+        elif parsed.path == "/book/open":
+            name = str(self._read_json_body().get("name") or "")
+            if os.sep in name or "/" in name or ".." in name:
+                self._send_json({"error": "bad name"}, 400)
+                return
+            try:
+                self._send_json(book_open(name))
+            except (OSError, ValueError, KeyError):
+                self._send_json({"error": "book not found"}, 404)
+        elif parsed.path == "/book/next":
+            self._send_json(book_step(1))
+        elif parsed.path == "/book/prev":
+            self._send_json(book_step(-1))
+        elif parsed.path == "/book/close":
+            self._send_json(book_close())
         elif parsed.path == "/anki":
             # Proxy to AnkiConnect: the browser page can't call it directly
             # (AnkiConnect's CORS allowlist doesn't include this origin by default).
-            length = int(self.headers.get("Content-Length", 0))
-            raw = self.rfile.read(length) if length else b"{}"
             try:
                 req = urllib.request.Request(
-                    "http://127.0.0.1:8765", data=raw,
+                    "http://127.0.0.1:8765", data=self._post_body or b"{}",
                     headers={"Content-Type": "application/json"})
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     self._send_bytes(resp.read(), "application/json; charset=utf-8")
@@ -1110,10 +1238,8 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as e:
                 self._send_json({"error": str(e)}, 500)
         elif parsed.path == "/pause":
-            length = int(self.headers.get("Content-Length", 0))
-            raw = self.rfile.read(length) if length else b"{}"
             try:
-                want = bool(json.loads(raw or b"{}").get("paused"))
+                want = bool(json.loads(self._post_body or b"{}").get("paused"))
             except Exception:
                 want = not PAUSED.is_set()
             if want:
@@ -1141,11 +1267,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             write_chunk(b": connected\n\n")
             if broadcaster.last_text:
-                write_chunk(b"data: " + json.dumps({"text": broadcaster.last_text}).encode("utf-8") + b"\n\n")
+                write_chunk(b"data: " + json.dumps(broadcaster.last_text).encode("utf-8") + b"\n\n")
             while True:
                 try:
-                    text = q.get(timeout=15)
-                    payload = b"data: " + json.dumps({"text": text}).encode("utf-8") + b"\n\n"
+                    payload = b"data: " + json.dumps(q.get(timeout=15)).encode("utf-8") + b"\n\n"
                     write_chunk(payload)
                 except queue.Empty:
                     write_chunk(b": ping\n\n")  # heartbeat keeps connection alive

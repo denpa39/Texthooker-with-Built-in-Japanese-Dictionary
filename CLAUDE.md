@@ -34,13 +34,14 @@ python test_ocr.py               # OCR pure-logic units (reading order, spans, P
 python test_text.py              # text plumbing: clean_hook_text, hook _split, ws extract,
                                  # origin guard, romajiToKana via node (needs node)
 python test_qr.py                # QR encoder: format BCH, RS syndromes, structure, fixture
+python test_book.py              # epub parser: spine order, ruby stripping, block split
 python deinflect.py              # de-inflector self-test (41 cases)
 node --check static/app.js       # JS syntax check (no other lint/build step exists)
 build_exe.bat                    # PyInstaller one-file exes (app + setup)
 ```
 
 CI (`.github/workflows/tests.yml`) runs syntax + test_ocr + test_merge + test_text +
-test_qr on every push; test_ranking self-skips there (no dict.sqlite) — run it locally
+test_qr + test_book on every push; test_ranking self-skips there (no dict.sqlite) — run it locally
 before pushing ranking changes. Pushing a `v*` tag triggers
 `.github/workflows/release.yml`: PyInstaller on windows-latest builds both exes and
 attaches DownTheRabbitHole-win64.zip (exes + README + LICENSE + START-HERE.txt) to the
@@ -57,7 +58,8 @@ UI verification: use the preview tools with `.claude/launch.json` server **"text
 game ──embedded TextractorCLI (hook.py)──┐
 game ──Textractor → clipboard (ctypes)───┤→ publish_line() → logs/ + SSE /events → browser
 Textractor/Agent WS servers :6677/:9001 ─┤                            │ kuromoji tokenizes in-browser
-game window ──screen OCR (ocr.py)────────┘   dict.sqlite ←── /scan ──┘ hover popup
+game window ──screen OCR (ocr.py)────────┤   dict.sqlite ←── /scan ──┘ hover popup
+.epub ── book.py, /book/next per keypress┘
 emulator (PPSSPP/PCSX2/Vita3K/yuzu…) ── Agent GUI (agent/, launched via /agent/start) ──:9001↑
 ```
 
@@ -85,7 +87,15 @@ emulator (PPSSPP/PCSX2/Vita3K/yuzu…) ── Agent GUI (agent/, launched via /a
   "logs" button shows hits in a pinned popup, click loads the line back into the reader),
   `/audio` (JapanesePod101 word-audio proxy for the popup's ♪ — the service answers EVERY
   query with something, a missing word returns a fixed 52,288-byte "not available" clip
-  that must 404, size gate in fetch_audio), `/qr` (PNG QR of LAN_URL else SERVER_URL —
+  that must 404, size gate in fetch_audio), `/book` `/book/import` `/book/open`
+  `/book/next` `/book/prev` `/book/close` (epub reading: import parses via book.py and
+  persists {title, lines} to books/<title>.json [gitignored] + per-book position in
+  books/progress.json, so a novel resumes across sessions; next publishes through
+  publish_line with book=True — tags the SSE event `book: true` so app.js appends
+  verbatim instead of running mergeReads reconciliation [consecutive book lines
+  legitimately contain each other] and resets the consecutive-repeat dedupe so
+  genuinely repeated lines still publish; prev does NOT republish — the client
+  removes the newest reader line instead, VN-backscroll style), `/qr` (PNG QR of LAN_URL else SERVER_URL —
   qr.py: stdlib byte-mode QR, versions 1-5, EC L, mask 0; format-bit PLACEMENT is the trap,
   it's the transpose of the data orientation — test_qr.py's fixture was frozen after
   matching the `qrcode` reference lib module-for-module and decoding with jsQR),
@@ -186,6 +196,11 @@ emulator (PPSSPP/PCSX2/Vita3K/yuzu…) ── Agent GUI (agent/, launched via /a
   `deinflect_data.py` is generated, don't hand-edit.
 - **qr.py** — minimal stdlib QR encoder for `/qr` (see the route note above). Self-contained;
   `python qr.py` prints a test matrix as ASCII.
+- **book.py** — epub → text lines for the book reader (see `/book*` routes above): stdlib
+  zipfile → container.xml → OPF spine order → html.parser text extraction. One block
+  element (`<p>`, `<h1>`…, `<br>`) = one reader line; `<rt>`/`<rp>` (ruby furigana) and
+  `<head>`/`<style>`/`<script>` text never leak — the reader adds its own furigana from
+  kuromoji, so baked-in readings would double up. `test_book.py` covers it.
 - **static/app.js** — tokenizes lines with kuromoji.js in the browser, wraps tokens in hoverable
   spans, fetches `/scan` per hover (cached), renders the popup (kanji cards, ♪ word audio via
   `/audio`, Anki export — attaches the `/snap` game-window screenshot to the card's Sentence
@@ -239,6 +254,11 @@ into the next particle, names burying real words, kana homographs).
   dict.sqlite, textractor/) lives NEXT TO the exe, not inside it.
 - Console printing: wrap in `sys.stdout.reconfigure(errors="replace")` — user consoles are cp932.
 - `_serve_events` uses manual chunked transfer encoding; heartbeat comment every 15s.
+- **POST bodies must be drained**: the server is HTTP/1.1 keep-alive, so a POST route
+  that never reads its request body leaves it on the socket and the NEXT request on
+  that connection parses the leftover bytes as a method line → 501 for everything
+  after. `do_POST` reads the whole body into `self._post_body` before routing — new
+  routes must use `self._post_body` / `_read_json_body()`, never `self.rfile.read`.
 
 ## Features removed on user request — do NOT re-add without asking
 

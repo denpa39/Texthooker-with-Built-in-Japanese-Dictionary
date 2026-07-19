@@ -14,9 +14,10 @@ __pycache__/
 textractor/
 agent/
 
-# Session logs + exports written by the server, and PyInstaller build output
+# Session logs + exports + imported epubs written by the server, and PyInstaller build output
 logs/
 exports/
+books/
 ocr_region.json
 *.exe
 build/

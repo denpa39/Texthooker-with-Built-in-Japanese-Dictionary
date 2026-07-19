@@ -170,6 +170,12 @@ entirely (general word frequency only).
   read and reading speed (chars/hr).
   The server also appends every line to a per-day file in `logs/` (named after the
   hooked game), so nothing is lost to a browser-storage wipe.
+- **Book reader (epub import)** — the **Book** toolbar button imports any `.epub` and
+  serves it one line at a time, like a visual novel: **Space**/**→** shows the next
+  line (a floating **Next ▸** button does the same on phones), **←** steps back.
+  Ruby furigana in the file is stripped so the reader's own hover dictionary and
+  furigana work on clean text. Imported books and your position in each are
+  remembered in `books/` across sessions.
 - **WebSocket input** — reads text straight from Textractor's websocket plugin (:6677)
   or Agent (:9001) with no clipboard round-trip; `--ws` configures or disables it.
 - **LAN mode** — `python server.py --lan` prints a LAN URL so you can read along on a
@@ -201,6 +207,7 @@ entirely (general word frequency only).
 | status dot | Connection state at a glance — green = ready, orange = paused, red = disconnected (hover for the label) |
 | lookup box | Type a word + Enter (romaji or English OK) — dictionary popup without hooking |
 | **Attach** | Hook a running game directly (embedded Textractor) — pick the process, then the text channel |
+| **Book** | Import an `.epub` and read it line by line — Space/→ next, ← back; position remembered per book |
 | **Pause** / **Resume** | Stop/continue capture (clipboard + websocket) |
 | **Furigana** | Show readings above kanji |
 | ▤ alignment icons | Text alignment — left, center, right, or justify |
