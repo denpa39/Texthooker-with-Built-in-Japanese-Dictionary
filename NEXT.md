@@ -12,6 +12,19 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-07-19, second pass)
+
+**More book formats + vertical text.** book.py grew `parse_book(data, filename)`
+dispatch: .txt (Aozora Bunko ruby ｜《》 / ［＃…］ notes / ---- block / 底本 footer
+stripped, UTF-8→cp932 fallback), .html through the same extractor, epub by extension
+or zip magic; .mobi/.azw/.pdf answer "convert with Calibre". **Vertical (tategaki)
+toggle** 縦 in Settings next to B/I: `.vertical` class on `<html>` (settings.js,
+persisted with appearance), `#lines` flips to writing-mode: vertical-rl, .line's
+sizing switched to logical props so it flips for free; app.js auto-scroll handles
+the negative-scrollLeft axis and the book arrows swap (← = next when vertical).
+SSE book lines now also trigger a book-state refresh on pages that didn't know a
+book was open (phone over LAN gets working controls without a reload).
+
 ## Done (2026-07-19)
 
 **Book reader (epub import)**: `book.py` (stdlib zip+OPF spine+html.parser, drops

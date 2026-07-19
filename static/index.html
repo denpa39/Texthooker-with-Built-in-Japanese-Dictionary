@@ -61,6 +61,7 @@
   <div class="style-toggles">
     <button id="boldToggle" class="style-toggle" title="Toggle bold reader text" aria-pressed="false"><b>B</b></button>
     <button id="italicToggle" class="style-toggle" title="Toggle italic reader text" aria-pressed="false"><i>I</i></button>
+    <button id="vertToggle" class="style-toggle" title="Vertical text — columns read right to left, like a printed novel" aria-pressed="false">縦</button>
   </div>
   <div class="set-label">Study</div>
   <label class="set-text">Anki deck
@@ -96,11 +97,12 @@
 
 <aside id="bookPanel" class="settings hidden" aria-label="Book reader">
   <div class="set-head"><b>Book</b><button id="bookClose" class="set-x" title="close">×</button></div>
-  <div id="bookMsg" class="hook-msg">Import an .epub and read it one line at a time —
-    <b>Space</b> or <b>→</b> shows the next line, <b>←</b> steps back. Every word gets
-    the same hover dictionary as game text.</div>
-  <button id="bookImport" class="set-reset" title="Pick an .epub file from this PC">Import .epub…</button>
-  <input id="bookFile" type="file" accept=".epub" hidden>
+  <div id="bookMsg" class="hook-msg">Import a book (.epub, .txt incl. Aozora Bunko, .html)
+    and read it one line at a time — <b>Space</b> or <b>→</b> shows the next line,
+    <b>←</b> steps back. Every word gets the same hover dictionary as game text.
+    Vertical text is in Settings.</div>
+  <button id="bookImport" class="set-reset" title="Pick an .epub / .txt / .html file from this PC">Import book…</button>
+  <input id="bookFile" type="file" accept=".epub,.txt,.text,.html,.htm,.xhtml,.xht" hidden>
   <div id="bookShelf" class="proc-list"></div>
   <button id="bookStop" class="set-reset hidden" title="Stop reading — position is remembered">Close book</button>
 </aside>

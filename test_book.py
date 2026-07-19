@@ -1,4 +1,5 @@
-"""EPUB parser units: spine order, ruby stripping, block splitting, title.
+"""E-book parser units: epub spine order, ruby stripping, block splitting,
+title; txt (Aozora markup, cp932); html; format dispatch.
 Pure stdlib, no network, no dict.sqlite — runs in CI."""
 
 import io
@@ -76,6 +77,48 @@ def main():
             assert False, "expected ValueError"
         except ValueError:
             pass
+
+    # --- txt: Aozora Bunko markup --------------------------------------- #
+    aozora = """吾輩は猫である
+夏目漱石
+
+-------------------------------------------------------
+【テキスト中に現れる記号について】
+《》：ルビ
+-------------------------------------------------------
+
+　｜吾輩《わがはい》は猫《ねこ》である。［＃「猫」に傍点］
+　名前はまだ無い。
+
+底本：「吾輩は猫である」新潮文庫
+入力：もんじゅ
+"""
+    _, tl = book.parse_txt(aozora.encode("utf-8"))
+    assert tl == ["吾輩は猫である", "夏目漱石", "吾輩は猫である。", "名前はまだ無い。"], tl
+
+    # cp932 fallback + BOM'd utf-8
+    _, tl = book.parse_txt("猫である。".encode("cp932"))
+    assert tl == ["猫である。"], tl
+    _, tl = book.parse_txt("﻿猫である。".encode("utf-8"))
+    assert tl == ["猫である。"], tl
+
+    # --- html ------------------------------------------------------------ #
+    _, hl = book.parse_html(CH1.encode("utf-8"))
+    assert hl[0] == "吾輩は猫である。" and len(hl) == 4, hl
+
+    # --- dispatch --------------------------------------------------------- #
+    t, dl = book.parse_book(make_epub(), "misnamed.txt")   # zip magic wins over ext
+    assert t == "吾輩は猫である" and len(dl) == 6
+    _, dl = book.parse_book("猫。".encode("cp932"), "novel.TXT")
+    assert dl == ["猫。"], dl
+    _, dl = book.parse_book(CH2.encode("utf-8"), "page.HTML")
+    assert dl == ["第二章", "どこで生れたかとんと見当がつかぬ。"], dl
+    for name in ("book.mobi", "book.azw3", "book.pdf"):
+        try:
+            book.parse_book(b"\x00\x01binary", name)
+            assert False, "expected ValueError for " + name
+        except ValueError as e:
+            assert "Calibre" in str(e)
 
     print("test_book: all ok")
 

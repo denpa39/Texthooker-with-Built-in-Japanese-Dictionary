@@ -220,12 +220,13 @@ def _book_publish_current():
         publish_line(lines[_BOOK["pos"]], book=True)
 
 
-def book_import(data, fallback_name):
-    """Parse an uploaded epub, persist it, open it at the remembered position."""
-    title, lines = book.parse_epub(data)          # raises ValueError
+def book_import(data, filename):
+    """Parse an uploaded e-book (epub/txt/html — book.parse_book dispatches on
+    the extension), persist it, open it at the remembered position."""
+    title, lines = book.parse_book(data, filename)   # raises ValueError
     if not lines:
-        raise ValueError("no text found in this epub")
-    title = title or fallback_name or "untitled"
+        raise ValueError("no text found in this file")
+    title = title or os.path.splitext(filename)[0] or "untitled"
     safe = "".join(ch for ch in title if ch not in '\\/:*?"<>|').strip() or "untitled"
     os.makedirs(BOOK_DIR, exist_ok=True)
     with open(os.path.join(BOOK_DIR, safe + ".json"), "w", encoding="utf-8") as f:
@@ -1182,8 +1183,7 @@ class Handler(BaseHTTPRequestHandler):
             err = agent_launch()
             self._send_json({"error": err, **agent_state()}, 400 if err else 200)
         elif parsed.path == "/book/import":
-            fname = unquote(self.headers.get("X-Book-Name", ""))
-            fname = os.path.splitext(os.path.basename(fname))[0]
+            fname = os.path.basename(unquote(self.headers.get("X-Book-Name", "")))
             try:
                 self._send_json(book_import(self._post_body, fname))
             except (ValueError, OSError) as e:

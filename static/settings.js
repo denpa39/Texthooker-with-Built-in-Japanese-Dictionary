@@ -31,7 +31,7 @@
     "Maru":           '"Kosugi Maru", "Yu Gothic UI", "Hiragino Maru Gothic ProN", sans-serif',
     "Monospace":      '"Cascadia Code", "Consolas", "MS Gothic", monospace',
   };
-  const DEFAULTS = { preset: "Alice", colors: {}, font: "Default (Sans)", fontSize: 30, align: "left", bold: false, italic: false, lineHeight: 1.9, furiSize: 0.45 };
+  const DEFAULTS = { preset: "Alice", colors: {}, font: "Default (Sans)", fontSize: 30, align: "left", bold: false, italic: false, vertical: false, lineHeight: 1.9, furiSize: 0.45 };
   const ALIGNS = ["left", "center", "right", "justify"];
   // Per alignment: the block's [left, right] margins. "auto" pushes the block to the
   // opposite edge — so left → flush left, right → flush right, center/justify → centred.
@@ -81,6 +81,8 @@
     root.setProperty("--line-mr", mr);
     root.setProperty("--font-weight", s.bold ? "700" : "400");
     root.setProperty("--font-style", s.italic ? "italic" : "normal");
+    // Vertical text (tategaki): a class on <html>, the CSS flips the reader.
+    document.documentElement.classList.toggle("vertical", !!s.vertical);
     root.setProperty("--line-height", String(s.lineHeight || 1.9));
     root.setProperty("--furi-size", (s.furiSize || 0.45) + "em");
   }
@@ -148,6 +150,15 @@
     const italicToggle = document.getElementById("italicToggle");
     if (boldToggle) boldToggle.addEventListener("click", () => { settings.bold = !settings.bold; commit(); });
     if (italicToggle) italicToggle.addEventListener("click", () => { settings.italic = !settings.italic; commit(); });
+    const vertToggle = document.getElementById("vertToggle");
+    if (vertToggle) vertToggle.addEventListener("click", () => {
+      settings.vertical = !settings.vertical;
+      commit();
+      // Jump to the newest line — the scroll axis just flipped, the old
+      // scroll offset points somewhere meaningless.
+      const lines = document.getElementById("lines");
+      if (lines) lines.scrollTo({ top: lines.scrollHeight, left: -lines.scrollWidth });
+    });
 
     // Text-size sliders: the toolbar's A slider AND the panel's "Text size" row
     // (the toolbar one hides on narrow windows, so the panel keeps it reachable).
@@ -230,6 +241,7 @@
         b.classList.toggle("active", b.dataset.align === settings.align));
       if (boldToggle) boldToggle.setAttribute("aria-pressed", String(!!settings.bold));
       if (italicToggle) italicToggle.setAttribute("aria-pressed", String(!!settings.italic));
+      if (vertToggle) vertToggle.setAttribute("aria-pressed", String(!!settings.vertical));
     }
 
     function commit() { apply(settings); save(settings); syncControls(); }

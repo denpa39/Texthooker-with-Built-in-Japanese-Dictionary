@@ -271,13 +271,20 @@ function addLine(text, isBook) {
   line.dataset.raw = text;
   line.appendChild(buildSentence(text));
 
-  // Only auto-scroll if the reader was already at the bottom — don't yank the user
-  // away when they've scrolled up to re-read. (Measured before append.)
-  const wasAtBottom = linesEl.scrollHeight - linesEl.scrollTop - linesEl.clientHeight < 80;
+  // Only auto-scroll if the reader was already at the newest edge — don't yank the
+  // user away when they've scrolled back to re-read. (Measured before append.)
+  // Vertical mode scrolls on X: in vertical-rl the newest line is LEFTMOST and
+  // Chrome's scrollLeft runs [-(scrollWidth-clientWidth), 0].
+  const vertical = document.documentElement.classList.contains("vertical");
+  const wasAtEnd = vertical
+    ? linesEl.scrollLeft + (linesEl.scrollWidth - linesEl.clientWidth) < 80
+    : linesEl.scrollHeight - linesEl.scrollTop - linesEl.clientHeight < 80;
   linesEl.appendChild(line);
-  if (wasAtBottom) {
+  if (wasAtEnd) {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    linesEl.scrollTo({ top: linesEl.scrollHeight, behavior: reduce ? "auto" : "smooth" });
+    const behavior = reduce ? "auto" : "smooth";
+    if (vertical) linesEl.scrollTo({ left: -linesEl.scrollWidth, behavior });
+    else linesEl.scrollTo({ top: linesEl.scrollHeight, behavior });
   }
 
   // Keep the DOM bounded. Known cosmetic quirk: a popup pinned to a word in the
@@ -1066,6 +1073,9 @@ function connectStream() {
     try {
       const d = JSON.parse(ev.data);
       addLine(d.text, d.book);
+      // A book line while we think no book is open: another page (or device)
+      // imported/opened one — sync so the advance keys and Next work here too.
+      if (d.book && bookSt.total <= 0) refreshBook();
     } catch (_) {}
   };
   es.onerror = () => {
@@ -1407,8 +1417,11 @@ document.addEventListener("keydown", e => {
   if (bookSt.total <= 0) return;
   if (e.target.matches("input, textarea, select")) return;
   if (e.target.closest(".token.word")) return;   // Space there pins the popup
-  if (e.key === " " || e.key === "ArrowRight") { e.preventDefault(); bookStep(1); }
-  else if (e.key === "ArrowLeft") { e.preventDefault(); bookStep(-1); }
+  // Vertical (tategaki) reads right-to-left, so the arrows flip: ← advances.
+  const fwd = document.documentElement.classList.contains("vertical") ? "ArrowLeft" : "ArrowRight";
+  const back = fwd === "ArrowLeft" ? "ArrowRight" : "ArrowLeft";
+  if (e.key === " " || e.key === fwd) { e.preventDefault(); bookStep(1); }
+  else if (e.key === back) { e.preventDefault(); bookStep(-1); }
 });
 
 document.getElementById("bookImport").addEventListener("click", () => bookFile.click());

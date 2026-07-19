@@ -1,9 +1,12 @@
-"""EPUB → plain text lines for the reader. Pure stdlib.
+"""E-book → plain text lines for the reader. Pure stdlib.
 
-parse_epub(bytes) -> (title, lines): follows the OPF spine order, strips markup
-with html.parser, and drops <rt>/<rp> so ruby furigana never leaks into the
-text (the reader adds its own furigana from kuromoji). One block element
-(<p>, <h1>… <br>) = one reader line, like one VN textbox advance.
+parse_book(bytes, filename) dispatches on extension (zip magic rescues a
+misnamed epub): .epub follows the OPF spine order; .html/.xhtml is one
+document; .txt handles Aozora Bunko markup (｜base《ruby》 ruby, ［＃…］
+editorial notes, the ---- 記号 block, the 底本： footer) and falls back from
+UTF-8 to cp932. All markup strippers drop ruby readings — the reader adds
+its own furigana from kuromoji, baked-in readings would double up. One block
+element / text line = one reader line, like one VN textbox advance.
 """
 
 import io
@@ -93,3 +96,61 @@ def parse_epub(data):
         p.close()
         lines.extend(p.lines)
     return title, lines
+
+
+def parse_html(data):
+    """A single .html/.xhtml document."""
+    p = _TextExtractor()
+    p.feed(_decode(data))
+    p.close()
+    return "", p.lines
+
+
+# Aozora Bunko plain-text markup: ｜漢字《かんじ》 (explicit-base ruby),
+# 漢字《かんじ》 (ruby on the preceding run), ［＃…］ editorial notes.
+_AOZORA_BASE = re.compile(r"[｜|]([^《》｜|]*)《[^》]*》")
+_AOZORA_RUBY = re.compile(r"《[^》]*》")
+_AOZORA_NOTE = re.compile(r"［＃[^］]*］")
+
+
+def _decode(data):
+    """UTF-8 (BOM-aware) first, then cp932 — the two encodings JP text files
+    actually come in. Last resort: UTF-8 with replacement chars."""
+    for enc in ("utf-8-sig", "cp932"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", "replace")
+
+
+def parse_txt(data):
+    """Plain text, one non-empty line per reader line. Aozora Bunko extras:
+    the ---- delimited 記号について block and the 底本： footer are cut,
+    ruby/notes stripped."""
+    text = _AOZORA_NOTE.sub("", _AOZORA_RUBY.sub("", _AOZORA_BASE.sub(r"\1", _decode(data))))
+    lines, skipping = [], False
+    for ln in text.splitlines():
+        ln = ln.strip()
+        if ln.startswith("----"):
+            skipping = not skipping
+            continue
+        if ln.startswith("底本："):
+            break
+        if ln and not skipping:
+            lines.append(ln)
+    return "", lines
+
+
+def parse_book(data, filename):
+    """Dispatch by extension; zip magic rescues a misnamed epub.
+    Raises ValueError on unsupported or unparseable input."""
+    ext = (filename or "").lower().rsplit(".", 1)[-1] if "." in (filename or "") else ""
+    if ext == "epub" or data[:2] == b"PK":
+        return parse_epub(data)
+    if ext in ("html", "htm", "xhtml", "xht"):
+        return parse_html(data)
+    if ext in ("txt", "text", ""):
+        return parse_txt(data)
+    raise ValueError(f".{ext} isn't supported — use .epub, .txt or .html "
+                     "(Calibre converts .mobi/.azw/.pdf to epub)")

@@ -34,7 +34,7 @@ python test_ocr.py               # OCR pure-logic units (reading order, spans, P
 python test_text.py              # text plumbing: clean_hook_text, hook _split, ws extract,
                                  # origin guard, romajiToKana via node (needs node)
 python test_qr.py                # QR encoder: format BCH, RS syndromes, structure, fixture
-python test_book.py              # epub parser: spine order, ruby stripping, block split
+python test_book.py              # e-book parsers: epub spine/ruby, Aozora txt, html, dispatch
 python deinflect.py              # de-inflector self-test (41 cases)
 node --check static/app.js       # JS syntax check (no other lint/build step exists)
 build_exe.bat                    # PyInstaller one-file exes (app + setup)
@@ -196,11 +196,16 @@ emulator (PPSSPP/PCSX2/Vita3K/yuzu…) ── Agent GUI (agent/, launched via /a
   `deinflect_data.py` is generated, don't hand-edit.
 - **qr.py** — minimal stdlib QR encoder for `/qr` (see the route note above). Self-contained;
   `python qr.py` prints a test matrix as ASCII.
-- **book.py** — epub → text lines for the book reader (see `/book*` routes above): stdlib
-  zipfile → container.xml → OPF spine order → html.parser text extraction. One block
-  element (`<p>`, `<h1>`…, `<br>`) = one reader line; `<rt>`/`<rp>` (ruby furigana) and
-  `<head>`/`<style>`/`<script>` text never leak — the reader adds its own furigana from
-  kuromoji, so baked-in readings would double up. `test_book.py` covers it.
+- **book.py** — e-book → text lines for the book reader (see `/book*` routes above).
+  `parse_book(data, filename)` dispatches on extension (zip magic rescues a misnamed
+  epub): epub = stdlib zipfile → container.xml → OPF spine order → html.parser; .html
+  = one document through the same extractor; .txt = line-per-line with Aozora Bunko
+  markup handling (｜base《ruby》 ruby, ［＃…］ notes, the ---- 記号 block, the 底本：
+  footer) and UTF-8→cp932 encoding fallback; .mobi/.azw/.pdf get a "convert with
+  Calibre" ValueError. One block element (`<p>`, `<h1>`…, `<br>`) / text line = one
+  reader line; `<rt>`/`<rp>` and Aozora 《》 (ruby furigana) never leak — the reader
+  adds its own furigana from kuromoji, baked-in readings would double up.
+  `test_book.py` covers it.
 - **static/app.js** — tokenizes lines with kuromoji.js in the browser, wraps tokens in hoverable
   spans, fetches `/scan` per hover (cached), renders the popup (kanji cards, ♪ word audio via
   `/audio`, Anki export — attaches the `/snap` game-window screenshot to the card's Sentence
@@ -214,6 +219,12 @@ emulator (PPSSPP/PCSX2/Vita3K/yuzu…) ── Agent GUI (agent/, launched via /a
   renders emoji as tofu.
 - **static/settings.js** — loaded blocking in `<head>` so the saved theme applies pre-paint.
   Theme = 6 CSS custom properties; every other colour derives via `color-mix()` in style.css.
+  Also owns the **vertical text (tategaki) toggle** (縦 next to B/I): a `.vertical` class
+  on `<html>`, persisted with the rest of the appearance settings. style.css flips
+  `#lines` to `writing-mode: vertical-rl` — `.line` uses LOGICAL props
+  (`inline-size`/`max-inline-size`/`margin-inline`) so its sizing flips for free; app.js
+  handles the flipped auto-scroll axis (Chrome's scrollLeft is NEGATIVE in vertical-rl,
+  newest line leftmost) and swaps the book-advance arrows (← = next when vertical).
   The Settings panel's "Read on your phone" QR row (index.html #lanRow) is populated by
   app.js from `/state`'s lan_url — hidden unless the server runs with --lan.
 - **LICENSE** — GPL-3.0 for the whole project (forced by the Yomitan-ported

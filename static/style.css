@@ -269,8 +269,9 @@ body {
   line-height: var(--line-height);
 }
 .line {
-  width: fit-content;     /* hug the sentence so the marker tracks text length… */
-  max-width: 36em;        /* …up to a comfortable reading measure (em tracks --font-size) */
+  inline-size: fit-content;     /* hug the sentence so the marker tracks text length… */
+  max-inline-size: 36em;        /* …up to a comfortable reading measure (em tracks --font-size);
+                                   logical, so in vertical mode this caps column HEIGHT */
   /* Alignment moves the whole block to a window edge (auto margins), not just the
      text inside it — so "left" hugs the left gutter, "right" the right. */
   margin-block: 0 .7em;
@@ -297,6 +298,25 @@ body {
   }
 }
 .sentence { word-break: break-word; }
+
+/* Vertical text (tategaki): .vertical on <html> (settings.js). The reader flips
+   to right-to-left columns; .line's logical margins/inline-size adapt on their
+   own, so only the container's axes need switching. Chrome's scrollLeft is
+   negative in vertical-rl — app.js handles the auto-scroll. */
+.vertical #lines {
+  writing-mode: vertical-rl;
+  overflow-y: hidden;
+  overflow-x: auto;
+  padding: 24px 32px 24px 40vw;   /* left gap = the horizontal mode's bottom 40vh */
+}
+.vertical .line { text-align: start; }  /* block-edge alignment is meaningless sideways */
+@media (prefers-reduced-motion: no-preference) {
+  .vertical .line.latest { animation-name: line-in-v; }
+  @keyframes line-in-v {
+    from { opacity: 0; transform: translateX(-6px); }
+    to   { opacity: 1; transform: none; }
+  }
+}
 
 .token { border-radius: 6px; cursor: default; transition: background .1s, color .1s; }
 .token.word { cursor: pointer; }   /* click pins the popup; hover peeks */
