@@ -172,13 +172,15 @@ entirely (general word frequency only).
   hooked game), so nothing is lost to a browser-storage wipe.
 - **Book reader** — the **Book** toolbar button imports an e-book (`.epub`, Kindle
   `.mobi`/`.azw`/`.azw3`, `.fb2`, `.txt` including Aozora Bunko markup with automatic
-  cp932 detection, or `.html`) and opens it as a paged reader, like a Kindle: one
-  full page at a time, flipped by clicking the far edge of the page, the arrow
-  keys, Space, PageUp/PageDown, or the mouse wheel (in vertical mode the pages
-  flip right-to-left, like a printed novel). Every word gets the same hover
-  dictionary and furigana as game text, a footer shows your percentage, and your
-  page is saved on every turn and restored when you come back — per book, across
-  sessions. Ruby furigana in the file is stripped so the reader's own furigana
+  cp932 detection, or `.html`) and opens it as a paged reader, like a Kindle: a
+  centred column of continuous justified prose with paragraph indents, one full
+  page at a time, flipped by clicking the far edge of the page, the arrow keys,
+  Space, PageUp/PageDown, the mouse wheel, or a swipe on a phone (in vertical
+  mode the pages flip right-to-left, like a printed novel). Every word gets the
+  same hover dictionary and furigana as game text, a footer shows your
+  percentage, and your page is saved on every turn and restored when you come
+  back — per book, across sessions. Tip: pick the Mincho font in Settings for
+  the full paperback feel. Ruby furigana in the file is stripped so the reader's own furigana
   doesn't double up. (DRM-protected Kindle books and `.pdf` can't be read
   directly — convert to epub with [Calibre](https://calibre-ebook.com/) first.)
 - **Vertical text (tategaki)** — the 縦 toggle in Settings flips the reader to

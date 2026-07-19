@@ -1410,6 +1410,14 @@ function renderBookPage(pos) {
   renderBookCounter();
 }
 
+// The page slides in from the direction it was turned (CSS animation).
+function playTurn(dir) {
+  linesEl.classList.remove("turn-fwd", "turn-back");
+  void linesEl.offsetWidth;   // restart the animation
+  linesEl.classList.add(dir > 0 ? "turn-fwd" : "turn-back");
+}
+linesEl.addEventListener("animationend", () => linesEl.classList.remove("turn-fwd", "turn-back"));
+
 // A page turn is the only thing that moves the reading position.
 async function bookTurn(dir) {
   if (!bookMode) return;
@@ -1436,6 +1444,7 @@ async function bookTurn(dir) {
     }
     renderBookPage(Math.max(0, Math.min(start, target - 1)));
   }
+  playTurn(dir);
   try { await jpost("/book/pos", { pos: bookSt.pos }); } catch (_) {}
 }
 
@@ -1495,6 +1504,21 @@ linesEl.addEventListener("wheel", e => {
   bookWheelAt = now;
   bookTurn(e.deltaY > 0 || e.deltaX > 0 ? 1 : -1);
 }, { passive: false });
+// swipe (phones reading over LAN): flick left = next page — reversed in
+// vertical mode, where the pages run right-to-left like a printed novel.
+let bookTouch = null;
+linesEl.addEventListener("touchstart", e => {
+  bookTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+}, { passive: true });
+linesEl.addEventListener("touchend", e => {
+  if (!bookMode || !bookTouch) return;
+  const dx = e.changedTouches[0].clientX - bookTouch.x;
+  const dy = e.changedTouches[0].clientY - bookTouch.y;
+  bookTouch = null;
+  if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;  // not a horizontal swipe
+  const next = dx < 0 ? !isVertical() : isVertical();
+  bookTurn(next ? 1 : -1);
+}, { passive: true });
 
 // Re-fill the page when the pane geometry changes.
 let bookResizeTimer = null;

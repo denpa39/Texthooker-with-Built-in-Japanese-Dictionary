@@ -300,11 +300,40 @@ body {
 .sentence { word-break: break-word; }
 
 /* Book mode: one Kindle-style page at a time. The pane never scrolls — app.js
-   fills it with lines until it would overflow and flips whole pages. The big
-   bottom/left "breathing room" padding of the session view would waste half
-   the page, so it drops to a symmetric margin. */
-#lines.paged { overflow: hidden; padding: 24px 32px 40px; }
-.vertical #lines.paged { overflow: hidden; padding: 24px 32px 40px; }
+   fills it with lines until it would overflow and flips whole pages.
+   Typography turns into a BOOK page here: a centred text column of continuous
+   justified prose with paragraph indents — none of the session view's
+   per-line chips, gaps, hover fills or fit-content widths. */
+#lines.paged {
+  overflow: hidden;
+  padding: 40px 48px 52px;
+  align-self: center;                /* centred reading column… */
+  width: min(100%, 46em);            /* …with a book-like measure */
+}
+.vertical #lines.paged {
+  align-self: stretch;               /* vertical text uses the full width; the */
+  width: auto;                       /* column height is the measure instead */
+  padding: 44px 48px;
+}
+#lines.paged .line {
+  inline-size: auto;
+  max-inline-size: none;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  text-indent: 1em;                  /* paragraph indent, like print */
+  text-align: justify;
+}
+#lines.paged .line:hover { background: none; }
+/* the page slides in the direction it was turned — subtle, Apple-Books-like */
+@media (prefers-reduced-motion: no-preference) {
+  #lines.paged.turn-fwd  { animation: page-fwd .22s ease-out; }
+  #lines.paged.turn-back { animation: page-back .22s ease-out; }
+  .vertical #lines.paged.turn-fwd  { animation-name: page-back; }  /* pages run right-to-left */
+  .vertical #lines.paged.turn-back { animation-name: page-fwd; }
+  @keyframes page-fwd  { from { opacity: .2; transform: translateX(22px); } to { opacity: 1; transform: none; } }
+  @keyframes page-back { from { opacity: .2; transform: translateX(-22px); } to { opacity: 1; transform: none; } }
+}
 .book-footer {
   position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
   z-index: 30; max-width: 70vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

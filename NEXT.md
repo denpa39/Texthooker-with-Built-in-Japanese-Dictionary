@@ -12,6 +12,17 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-07-20, book typography)
+
+**Paged mode now LOOKS like a book** (user: "how is this close to books and
+kindle" — the pagination worked but pages rendered as the session's chip UI:
+fit-content hover-highlighted pills with gaps). `#lines.paged` CSS: centred
+46em column, lines become continuous justified paragraphs with 1em text-indent,
+margins/padding/border-radius/hover-fill zeroed; vertical mode uses full-height
+right-to-left columns. Direction-aware page-turn slide animation
+(.turn-fwd/.turn-back, reversed in vertical, prefers-reduced-motion respected).
+Touch swipe turns pages (left = next horizontally, reversed vertical).
+
 ## Done (2026-07-19, fifth pass — Kindle-style pages)
 
 **Book mode paginates now** ("just copy kindle atp"). One page in the DOM at a
