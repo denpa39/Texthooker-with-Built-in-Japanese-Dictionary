@@ -61,6 +61,11 @@ CASES = [
     #    (The over-match guard stays: そこには above — 底荷's extension is kana.)
     ("生返事 (rescue)",     "生返事だった",         "名詞",   "ナマ",  "生",    "生",    "word", "half-hearted"),
     ("棒読み (rescue)",     "棒読みで言った",       "名詞",   "ボウ",  "棒",    "棒",    "word", "monotone"),
+    # -- katakana tokens: a rare loanword homograph must not bury the name -----
+    #    (hover レオン showed "leone (currency of Sierra Leone)" above Leon)
+    ("レオン -> name Leon", "レオン・ウェルトに捧げます", "名詞", "レオン", "レオン", "レオン", "name", "Leon"),
+    #    ...but an established katakana word still beats its name homograph
+    ("カメラ stays a word", "カメラを買った",       "名詞",   "カメラ", "カメラ", "カメラ", "word", "camera"),
 ]
 
 # English reverse lookup (/search): (query, acceptable top-1 headwords, and a
@@ -157,6 +162,18 @@ def main():
         print(f"PASS  trail order: {' › '.join(trail)}")
     else:
         print(f"FAIL  trail order: got {trail}")
+        failures += 1
+
+    # Katakana prefix garbage: a match covering only a prefix of a pure-katakana
+    # token is dropped (hover テグジュペリ used to show 大邱「テグ」"Daegu").
+    total += 1
+    sc = server.scan("テグジュペリ", "名詞", "テグジュペリ", "テグジュペリ", "テグジュペリ")
+    partial = [c for c in sc if c["len"] < 6]
+    if not partial:
+        print("PASS  katakana prefix-match drop (テグジュペリ shows no 大邱)")
+    else:
+        heads = [(c["entry"].get("k") or c["entry"].get("r") or ["?"])[0] for c in partial]
+        print(f"FAIL  katakana prefix-match drop: got sub-token matches {heads[:3]}")
         failures += 1
 
     print(f"\n{total - failures}/{total} passed")

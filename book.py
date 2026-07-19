@@ -12,6 +12,7 @@ element / text line = one reader line, like one VN textbox advance.
 import io
 import posixpath
 import re
+import struct
 import zipfile
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
@@ -142,15 +143,144 @@ def parse_txt(data):
     return "", lines
 
 
+def parse_fb2(data):
+    """FictionBook 2: plain XML. <p>/<v>/<subtitle> under each <body>, in
+    document order (section titles are <title><p>…, so they come along)."""
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as e:
+        raise ValueError("not an FB2: " + str(e))
+    title_el = root.find(".//{*}book-title")
+    title = (title_el.text or "").strip() if title_el is not None else ""
+    lines = []
+    for body in root.findall("{*}body"):
+        for el in body.iter():
+            if el.tag.rsplit("}", 1)[-1] in ("p", "v", "subtitle"):
+                t = re.sub(r"\s+", " ", "".join(el.itertext())).strip()
+                if t:
+                    lines.append(t)
+    return title, lines
+
+
+# ---- MOBI / PalmDOC (.mobi .prc .pdb .azw .azw3) --------------------------- #
+
+def _palmdoc_decompress(data):
+    """PalmDOC LZ77: literals, 0x80-0xBF back-references, 0xC0+ space+char."""
+    out = bytearray()
+    i, n = 0, len(data)
+    while i < n:
+        b = data[i]; i += 1
+        if b == 0 or 0x09 <= b <= 0x7F:
+            out.append(b)
+        elif b <= 0x08:                     # 1-8 literal bytes follow
+            out += data[i:i + b]; i += b
+        elif b <= 0xBF:                     # 2-byte back-reference
+            if i >= n:
+                break
+            pair = (b << 8) | data[i]; i += 1
+            dist, length = (pair >> 3) & 0x7FF, (pair & 7) + 3
+            if not dist or dist > len(out):
+                continue                     # corrupt pair — skip, keep going
+            for _ in range(length):
+                out.append(out[-dist])
+        else:                               # 0xC0+: space + ASCII char
+            out += b" "; out.append(b ^ 0x80)
+    return bytes(out)
+
+
+def _trailing_size(rec):
+    """Size of one trailing data entry: variable-width int in the record's last
+    bytes, high bit marks the first byte (mobiunpack's algorithm)."""
+    num = 0
+    for b in rec[-4:]:
+        if b & 0x80:
+            num = 0
+        num = (num << 7) | (b & 0x7F)
+    return num
+
+
+def _trim_extra(rec, flags):
+    """Strip MOBI per-record trailing entries: one sized entry per set flag bit
+    above bit 0; bit 0 is the multibyte-overlap entry (count in the last byte)."""
+    for _ in range(bin(flags >> 1).count("1")):
+        v = _trailing_size(rec)
+        if 0 < v <= len(rec):
+            rec = rec[:-v]
+    if flags & 1 and rec:
+        rec = rec[:-((rec[-1] & 3) + 1)]
+    return rec
+
+
+def parse_mobi(data):
+    """Mobipocket / plain PalmDOC. Handles no-compression and PalmDOC-LZ77
+    books (the overwhelming majority); DRM and HUFF/CDIC get a clear error."""
+    if len(data) < 78 or data[60:68] not in (b"BOOKMOBI", b"TEXtREAd"):
+        raise ValueError("not a MOBI/PalmDOC file")
+    num_recs = struct.unpack(">H", data[76:78])[0]
+    offs = [struct.unpack(">I", data[78 + 8 * i:82 + 8 * i])[0] for i in range(num_recs)]
+    offs.append(len(data))
+    rec = lambda i: data[offs[i]:offs[i + 1]]
+    r0 = rec(0)
+    compression, = struct.unpack(">H", r0[0:2])
+    rec_count, = struct.unpack(">H", r0[8:10])
+    encryption, = struct.unpack(">H", r0[12:14])
+    if encryption:
+        raise ValueError("this book is DRM-protected — remove the DRM or convert it to epub with Calibre")
+    if compression == 17480:
+        raise ValueError("Kindle HUFF/CDIC compression isn't supported — convert to epub with Calibre")
+    if compression not in (1, 2):
+        raise ValueError(f"unknown MOBI compression ({compression})")
+
+    title, codec, extra_flags = "", "cp1252", 0
+    if r0[16:20] == b"MOBI":
+        header_len, = struct.unpack(">I", r0[20:24])
+        enc, = struct.unpack(">I", r0[28:32])
+        codec = "utf-8" if enc == 65001 else "cp1252"
+        if header_len >= 0xE4 and len(r0) >= 16 + 0xE4:
+            extra_flags, = struct.unpack(">H", r0[16 + 0xE2:16 + 0xE4])
+        if header_len >= 92:   # full-name offset/length live at header offset 84/88
+            toff, tlen = struct.unpack(">II", r0[16 + 84:16 + 92])
+            if 0 < tlen and toff + tlen <= len(r0):
+                title = r0[toff:toff + tlen].decode(codec, "replace").strip()
+    else:
+        title = data[:32].split(b"\0", 1)[0].decode("cp1252", "replace").strip()
+
+    parts = []
+    for i in range(1, min(rec_count, num_recs - 1) + 1):
+        r = _trim_extra(rec(i), extra_flags)
+        parts.append(_palmdoc_decompress(r) if compression == 2 else r)
+    html = b"".join(parts).decode(codec, "replace")
+    p = _TextExtractor()
+    p.feed(html)
+    p.close()
+    if not p.lines:
+        raise ValueError("no text found in this MOBI")
+    return title, p.lines
+
+
 def parse_book(data, filename):
-    """Dispatch by extension; zip magic rescues a misnamed epub.
+    """Dispatch by content magic first, then extension.
     Raises ValueError on unsupported or unparseable input."""
     ext = (filename or "").lower().rsplit(".", 1)[-1] if "." in (filename or "") else ""
-    if ext == "epub" or data[:2] == b"PK":
-        return parse_epub(data)
+    if data[:2] == b"PK":                    # epub, or a zipped .fb2
+        try:
+            return parse_epub(data)
+        except ValueError:
+            try:
+                zf = zipfile.ZipFile(io.BytesIO(data))
+                fb2 = next(n for n in zf.namelist() if n.lower().endswith(".fb2"))
+                return parse_fb2(zf.read(fb2))
+            except (zipfile.BadZipFile, StopIteration, KeyError):
+                raise ValueError("zip archive with no epub structure or .fb2 inside")
+    if len(data) >= 68 and data[60:68] in (b"BOOKMOBI", b"TEXtREAd"):
+        return parse_mobi(data)
+    if ext == "fb2":
+        return parse_fb2(data)
     if ext in ("html", "htm", "xhtml", "xht"):
         return parse_html(data)
     if ext in ("txt", "text", ""):
         return parse_txt(data)
-    raise ValueError(f".{ext} isn't supported — use .epub, .txt or .html "
-                     "(Calibre converts .mobi/.azw/.pdf to epub)")
+    if ext in ("pdf", "kfx"):
+        raise ValueError(f".{ext} isn't supported — convert it to epub with Calibre")
+    raise ValueError(f".{ext} isn't supported — use .epub, .mobi/.azw, .fb2, .txt or .html "
+                     "(Calibre converts anything else to epub)")

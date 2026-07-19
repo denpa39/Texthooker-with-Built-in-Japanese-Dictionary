@@ -536,6 +536,13 @@ def _has_kanji(s):
     return any("一" <= ch <= "鿿" or ch == "々" for ch in s)
 
 
+_KATAKANA_RUN = re.compile(r"[ァ-ヶー]+")
+
+
+def _is_katakana(s):
+    return bool(s) and _KATAKANA_RUN.fullmatch(s) is not None
+
+
 def _uk(e):
     """Word primarily written in kana: JMdict tags the sense 'uk' (usually kana).
     Judged on the FIRST sense only — that's the word's main usage; a rare
@@ -664,9 +671,10 @@ def _commonness(e):
 _BOUNDARY_AFTER = set("はがをにでとへもやのかだね、。！？…‥・「」『』（）　 ")
 
 
-def _sort_key(c, tok_len, pos, reading_h, pref, nxt=""):
+def _sort_key(c, tok_len, pos, reading_h, pref, nxt="", kata_tok=False):
     """The one ranking key for a candidate (lower sorts first). `nxt` is the
-    char right after the matched prefix in the hovered text ("" at line end)."""
+    char right after the matched prefix in the hovered text ("" at line end);
+    `kata_tok` means the hovered token is a pure-katakana run."""
     e = c["entry"]
     is_name = c["kind"] == "name"
     is_verb = pos == "動詞"
@@ -708,9 +716,18 @@ def _sort_key(c, tok_len, pos, reading_h, pref, nxt=""):
             eff_len = tok_len
 
     common_lvl, common_mag = _commonness(e)
+    # Katakana tokens are mostly foreign words and names, and the word side of a
+    # katakana homograph pair is often an obscure loanword (レオン the Sierra
+    # Leone currency vs レオン the name Leon). So for a katakana hover the
+    # word-beats-name rule only holds when the word is itself established —
+    # a rare word ties with the name and the later tiers decide.
+    if kata_tok:
+        name_pen = 0 if (is_name or _established(e)) else 1
+    else:
+        name_pen = 1 if is_name else 0
     return (
         -eff_len,                          # 1. longest *plausible* match first
-        1 if is_name else 0,               # 2. a real word beats a same-length name
+        name_pen,                          # 2. a real word beats a same-length name
         0 if pos_ok else 1,                # 3. part-of-speech agreement (其処 pronoun > 底 noun)
         0 if read_ok else 1,               # 4. reading agreement (any reading)
         0 if primary_read_ok else 1,       # 5. the hovered reading is the entry's primary one
@@ -801,9 +818,18 @@ def scan(text, pos=None, reading=None, base=None, surface=None):
                         c["mr"] = rk
                         break
 
+    # A pure-katakana token is ONE loanword or foreign name — a match covering
+    # only a prefix of it is essentially always garbage (hover テグジュペリ used
+    # to show 大邱「テグ」"Daegu"). Katakana isn't agglutinative the way kanji
+    # compounds are, so drop sub-token matches outright; an honest "no match"
+    # beats a confident wrong one.
+    kata_tok = _is_katakana(surface or "")
+    if kata_tok:
+        cands = [c for c in cands if c["len"] >= tok_len]
+
     cands.sort(key=lambda c: _sort_key(
         c, tok_len, pos, reading_h, pref,
-        text[c["len"]] if c["len"] < len(text) else ""))
+        text[c["len"]] if c["len"] < len(text) else "", kata_tok))
     return cands[:12]
 
 

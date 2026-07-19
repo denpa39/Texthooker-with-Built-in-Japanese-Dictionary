@@ -1,8 +1,10 @@
 """E-book parser units: epub spine order, ruby stripping, block splitting,
-title; txt (Aozora markup, cp932); html; format dispatch.
+title; txt (Aozora markup, cp932); html; fb2 (+zipped); mobi (PalmDB +
+PalmDOC decompression); format dispatch.
 Pure stdlib, no network, no dict.sqlite — runs in CI."""
 
 import io
+import struct
 import zipfile
 
 import book
@@ -113,12 +115,79 @@ def main():
     assert dl == ["猫。"], dl
     _, dl = book.parse_book(CH2.encode("utf-8"), "page.HTML")
     assert dl == ["第二章", "どこで生れたかとんと見当がつかぬ。"], dl
-    for name in ("book.mobi", "book.azw3", "book.pdf"):
+    for name in ("book.pdf", "book.kfx", "book.xyz"):
         try:
             book.parse_book(b"\x00\x01binary", name)
             assert False, "expected ValueError for " + name
         except ValueError as e:
             assert "Calibre" in str(e)
+
+    # --- fb2 (+ zipped fb2) ----------------------------------------------- #
+    fb2 = """<?xml version="1.0" encoding="utf-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
+  <description><title-info><book-title>星の王子さま</book-title></title-info></description>
+  <body>
+    <section><title><p>第一章</p></title>
+      <p>ぼくが六つのとき、</p><p>すばらしい絵を見た。</p>
+      <empty-line/><p>  </p>
+    </section>
+  </body>
+  <body name="notes"><section><p>注釈です。</p></section></body>
+</FictionBook>"""
+    t, fl = book.parse_fb2(fb2.encode("utf-8"))
+    assert t == "星の王子さま", t
+    assert fl == ["第一章", "ぼくが六つのとき、", "すばらしい絵を見た。", "注釈です。"], fl
+
+    zbuf = io.BytesIO()
+    with zipfile.ZipFile(zbuf, "w") as zf:
+        zf.writestr("novel.fb2", fb2)
+    t, fl = book.parse_book(zbuf.getvalue(), "novel.fb2.zip")   # PK magic, no epub inside
+    assert t == "星の王子さま" and len(fl) == 4
+
+    # --- PalmDOC LZ77 decompressor ---------------------------------------- #
+    # literals a b c, back-reference dist=3 len=6, then 0xC1 = space + 'A'
+    assert book._palmdoc_decompress(b"abc\x80\x1b\xc1") == b"abcabcabc A"
+    assert book._palmdoc_decompress(b"\x02xy") == b"xy"          # literal run
+    assert book._palmdoc_decompress(b"") == b""
+
+    # --- mobi (PalmDB container) ------------------------------------------ #
+    def make_mobi(html, compression=1, encryption=0, kind=b"BOOKMOBI", encoding=65001):
+        recs = [html[i:i + 4096] for i in range(0, len(html), 4096)] or [b""]
+        if kind == b"BOOKMOBI":
+            # PalmDOC(16) + minimal MOBI header: magic, header_len 24, type, encoding
+            r0 = struct.pack(">HHIHHHH", compression, 0, len(html), len(recs), 4096, encryption, 0)
+            r0 += b"MOBI" + struct.pack(">II", 24, 2) + struct.pack(">I", encoding) + b"\0" * 8
+        else:
+            r0 = struct.pack(">HHIHHHH", compression, 0, len(html), len(recs), 4096, encryption, 0)
+        records = [r0] + recs
+        header = b"testbook".ljust(32, b"\0") + struct.pack(">HH", 0, 0) + b"\0" * 24
+        header += kind[:4] + kind[4:] + struct.pack(">II", 0, 0) + struct.pack(">H", len(records))
+        off = len(header) + 8 * len(records)
+        info = b""
+        for i, r in enumerate(records):
+            info += struct.pack(">IBBH", off, 0, 0, i)
+            off += len(r)
+        return header + info + b"".join(records)
+
+    html_jp = "<html><body><p>吾輩は猫である。</p><p>名前はまだ無い。</p></body></html>".encode("utf-8")
+    t, ml = book.parse_mobi(make_mobi(html_jp))
+    assert ml == ["吾輩は猫である。", "名前はまだ無い。"], ml
+
+    # PalmDOC-compressed record (compression=2): compress = pass-through-safe
+    # bytes only (all < 0x80 stay literal), so ASCII html works as-is
+    html_en = b"<html><body><p>Hello book.</p></body></html>"
+    t, ml = book.parse_mobi(make_mobi(html_en, compression=2, encoding=1252))
+    assert ml == ["Hello book."], ml
+
+    # DRM and HUFF refuse with a clear message; dispatch sniffs the magic
+    for kwargs, msg in (({"encryption": 2}, "DRM"), ({"compression": 17480}, "HUFF")):
+        try:
+            book.parse_mobi(make_mobi(html_en, **kwargs))
+            assert False, "expected ValueError"
+        except ValueError as e:
+            assert msg in str(e), (msg, str(e))
+    _, ml = book.parse_book(make_mobi(html_jp), "whatever.azw")
+    assert ml[0] == "吾輩は猫である。"
 
     print("test_book: all ok")
 

@@ -12,6 +12,19 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-07-19, third pass)
+
+**Kindle formats + katakana ranking.** Prompted by reading 星の王子さま: the user's
+"epub-like file" = .mobi/.azw. book.py now parses the PalmDB container directly —
+stdlib PalmDOC-LZ77 decompression, MOBI extra-data trailing-entry trim, cp1252/utf-8
+from the header; DRM'd and HUFF/CDIC books answer with a clear Calibre message
+instead of garbage. .fb2 (+ fb2 inside a zip) also supported; dispatch is
+content-magic first, extension second. RANKING: two katakana rules in /scan —
+pure-katakana tokens drop sub-token matches (テグジュペリ showed 大邱「テグ」
+"Daegu"), and word-beats-name only holds for established words on katakana hovers
+(レオン the Sierra-Leone currency buried the name Leon; カメラ still beats the name
+Camera). Both encoded in test_ranking.py.
+
 ## Done (2026-07-19, second pass)
 
 **More book formats + vertical text.** book.py grew `parse_book(data, filename)`

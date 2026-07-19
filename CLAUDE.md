@@ -197,12 +197,17 @@ emulator (PPSSPP/PCSX2/Vita3K/yuzu…) ── Agent GUI (agent/, launched via /a
 - **qr.py** — minimal stdlib QR encoder for `/qr` (see the route note above). Self-contained;
   `python qr.py` prints a test matrix as ASCII.
 - **book.py** — e-book → text lines for the book reader (see `/book*` routes above).
-  `parse_book(data, filename)` dispatches on extension (zip magic rescues a misnamed
-  epub): epub = stdlib zipfile → container.xml → OPF spine order → html.parser; .html
-  = one document through the same extractor; .txt = line-per-line with Aozora Bunko
-  markup handling (｜base《ruby》 ruby, ［＃…］ notes, the ---- 記号 block, the 底本：
-  footer) and UTF-8→cp932 encoding fallback; .mobi/.azw/.pdf get a "convert with
-  Calibre" ValueError. One block element (`<p>`, `<h1>`…, `<br>`) / text line = one
+  `parse_book(data, filename)` dispatches on content magic first, then extension:
+  PK zip = epub (container.xml → OPF spine order → html.parser), falling back to a
+  .fb2 inside the archive (fb2.zip); BOOKMOBI/TEXtREAd magic = **Kindle .mobi/.azw/
+  .azw3/.prc** — PalmDB records, stdlib PalmDOC-LZ77 decompression (`_palmdoc_decompress`),
+  per-record trailing-entry trim via the MOBI extra-data flags, cp1252/utf-8 from the
+  MOBI header; DRM'd and HUFF/CDIC-compressed books get a clear "convert with Calibre"
+  ValueError (never garbage); .fb2 = FictionBook XML (`<p>/<v>/<subtitle>` per body);
+  .html = one document through the same extractor; .txt = line-per-line with Aozora
+  Bunko markup handling (｜base《ruby》 ruby, ［＃…］ notes, the ---- 記号 block, the
+  底本： footer) and UTF-8→cp932 encoding fallback; .pdf/.kfx stay "convert with
+  Calibre". One block element (`<p>`, `<h1>`…, `<br>`) / text line = one
   reader line; `<rt>`/`<rp>` and Aozora 《》 (ruby furigana) never leak — the reader
   adds its own furigana from kuromoji, baked-in readings would double up.
   `test_book.py` covers it.
@@ -241,10 +246,16 @@ or line end) — 生返事 #16,624 hover 生 in 生返事だった. Kana extensi
 over-match trap class swallows particles (底荷「そこに」+ は passes the boundary test but
 not the kanji test). A kana-written hover
 prefers the usually-kana homograph (JMdict `uk` on the first sense — the "uk boost"), ranked
-below the reading-priority tiers so 豆「まめ」still beats the rare uk 忠実「まめ」. Frontend
+below the reading-priority tiers so 豆「まめ」still beats the rare uk 忠実「まめ」. KATAKANA
+tokens get two special rules (western names were a weakness): a pure-katakana token drops
+all sub-token matches outright (katakana isn't agglutinative — hover テグジュペリ used to
+show 大邱「テグ」"Daegu"; honest no-match beats a confident wrong one), and the
+word-beats-name tier only holds for katakana when the word is `_established` — a rare
+loanword ties with the name and later tiers decide (レオン the Sierra-Leone currency no
+longer buries Leon, while カメラ still beats the name Camera). Frontend
 passes each hovered token's POS/reading/base/surface from kuromoji to drive it. Any change here
 must keep `python test_ranking.py` green — those cases encode fixed bug classes (over-extension
-into the next particle, names burying real words, kana homographs).
+into the next particle, names burying real words, kana homographs, katakana prefix garbage).
 
 ## Hard-won gotchas (don't rediscover these)
 

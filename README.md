@@ -170,14 +170,15 @@ entirely (general word frequency only).
   read and reading speed (chars/hr).
   The server also appends every line to a per-day file in `logs/` (named after the
   hooked game), so nothing is lost to a browser-storage wipe.
-- **Book reader** — the **Book** toolbar button imports an e-book (`.epub`, `.txt`
-  including Aozora Bunko markup with automatic cp932 detection, or `.html`) and
-  serves it one line at a time, like a visual novel: **Space**/**→** shows the next
-  line (a floating **Next ▸** button does the same on phones), **←** steps back.
-  Ruby furigana in the file is stripped so the reader's own hover dictionary and
-  furigana work on clean text. Imported books and your position in each are
-  remembered in `books/` across sessions. (For `.mobi`/`.azw`/`.pdf`, convert to
-  epub with [Calibre](https://calibre-ebook.com/) first.)
+- **Book reader** — the **Book** toolbar button imports an e-book (`.epub`, Kindle
+  `.mobi`/`.azw`/`.azw3`, `.fb2`, `.txt` including Aozora Bunko markup with automatic
+  cp932 detection, or `.html`) and serves it one line at a time, like a visual novel:
+  **Space**/**→** shows the next line (a floating **Next ▸** button does the same on
+  phones), **←** steps back. Ruby furigana in the file is stripped so the reader's own
+  hover dictionary and furigana work on clean text. Imported books and your position
+  in each are remembered in `books/` across sessions. (DRM-protected Kindle books and
+  `.pdf` can't be read directly — convert to epub with
+  [Calibre](https://calibre-ebook.com/) first.)
 - **Vertical text (tategaki)** — the 縦 toggle in Settings flips the reader to
   right-to-left vertical columns, like a printed novel; furigana, the hover
   dictionary and the book reader all follow (in vertical mode **←** advances the
@@ -213,7 +214,7 @@ entirely (general word frequency only).
 | status dot | Connection state at a glance — green = ready, orange = paused, red = disconnected (hover for the label) |
 | lookup box | Type a word + Enter (romaji or English OK) — dictionary popup without hooking |
 | **Attach** | Hook a running game directly (embedded Textractor) — pick the process, then the text channel |
-| **Book** | Import an e-book (`.epub` / `.txt` / `.html`) and read it line by line — Space/→ next, ← back; position remembered per book |
+| **Book** | Import an e-book (`.epub` / `.mobi` / `.azw` / `.fb2` / `.txt` / `.html`) and read it line by line — Space/→ next, ← back; position remembered per book |
 | **Pause** / **Resume** | Stop/continue capture (clipboard + websocket) |
 | **Furigana** | Show readings above kanji |
 | ▤ alignment icons | Text alignment — left, center, right, or justify |
