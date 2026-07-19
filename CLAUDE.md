@@ -92,12 +92,17 @@ emulator (PPSSPP/PCSX2/Vita3K/yuzu…) ── Agent GUI (agent/, launched via /a
   {title, lines} to books/<title>.json [gitignored] + per-book position in
   books/progress.json; open returns the book's FULL lines array — the client shows
   it PAGED, Kindle-style [bookMode in app.js: one page in the DOM at a time,
-  renderBookPage fills the pane line-by-line until it overflows, bookTurn flips
+  fillForward fills the pane line-by-line until it overflows, bookTurn flips
   whole pages via edge clicks / arrows / Space / PageUp+Down / wheel / touch
   swipe, zones+arrows+swipe flip in vertical mode; pos = the page's first line,
-  saved to /book/pos per turn; resize + vertical toggle re-fill from the same
-  pos; footer pill shows title + percent; session restores from localStorage on
-  close]. `#lines.paged` in style.css turns the chip UI into BOOK typography —
+  saved to /book/pos per turn; footer pill + Book-panel jump slider/number show
+  PAGE numbers from a page map (buildPageMap: same fillForward run in an
+  offscreen measurer sized/styled to the real pane, walking the whole book,
+  cached by a layout fingerprint = book/vertical/paneW/paneH/fontSize/
+  lineHeight/furi/tokenizer, rebuilt on resize + vertical + font/line-height/
+  furigana change via refreshBookLayout, yields to the event loop so a long
+  novel never freezes); resize + vertical toggle re-page from the same pos;
+  session restores from localStorage on close]. `#lines.paged` in style.css turns the chip UI into BOOK typography —
   centred 46em column, continuous justified prose, 1em paragraph indents, no
   per-line padding/gaps/hover fill — and plays a direction-aware slide on turn
   (.turn-fwd/.turn-back, reversed under .vertical). Nothing goes through

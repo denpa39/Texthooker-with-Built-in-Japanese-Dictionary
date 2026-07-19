@@ -165,6 +165,7 @@ kuromoji.builder({ dicPath: "/static/kuromoji/dict" }).build((err, tk) => {
   tokenizer = tk;
   // Re-render any lines that arrived before the tokenizer was ready.
   rebuildSentences();
+  refreshBookLayout(true);   // furigana now available → re-page + remap a book
 });
 
 // Rebuild the tokenized text of every line in place. In book mode only the
@@ -1109,6 +1110,7 @@ furiBtn.addEventListener("click", () => {
   saveStudy();
   furiBtn.classList.toggle("active", study.furi !== "off");
   rebuildSentences();
+  refreshBookLayout(true);   // ruby changes line heights → re-page + remap
 });
 furiBtn.classList.toggle("active", study.furi !== "off");
 if (study.furi !== "off") rebuildSentences();
@@ -1384,30 +1386,120 @@ function makeBookLine(text) {
   return div;                             // rebuildSentences upgrades in place
 }
 
-// Fill the pane starting at `pos` until it overflows; the overflowing line
-// goes to the next page (a single line taller than the pane gets a page of
-// its own and is clipped — Kindle splits paragraphs, we don't).
-function renderBookPage(pos) {
-  pos = Math.max(0, Math.min(pos, bookLines.length - 1));
-  if (!popup.classList.contains("hidden")) unpin();
-  linesEl.innerHTML = "";
-  const overflows = () => isVertical()
-    ? linesEl.scrollWidth > linesEl.clientWidth
-    : linesEl.scrollHeight > linesEl.clientHeight;
-  let end = pos;
+// Fill `container` from line `start` until it would overflow; the overflowing
+// line goes to the next page (a single line taller than the pane gets a page of
+// its own and is clipped — Kindle splits paragraphs, we don't). Returns the
+// index one past the last line placed. `styleKid` lets the offscreen measurer
+// apply the paged `.line` styles that only the real #lines.paged pane gets from
+// CSS — keeping the map's pagination identical to what renders.
+function fillForward(container, start, styleKid) {
+  container.innerHTML = "";
+  const vert = isVertical();
+  const overflows = () => vert ? container.scrollWidth > container.clientWidth
+                               : container.scrollHeight > container.clientHeight;
+  let end = start;
   while (end < bookLines.length) {
     const div = makeBookLine(bookLines[end]);
-    linesEl.appendChild(div);
+    if (styleKid) styleKid(div);
+    container.appendChild(div);
     if (overflows()) {
-      if (linesEl.children.length > 1) div.remove();
+      if (container.children.length > 1) div.remove();
       else end++;                        // one giant line: its own page
       break;
     }
     end++;
   }
-  bookPageEnd = end;
+  return end;
+}
+
+function renderBookPage(pos) {
+  pos = Math.max(0, Math.min(pos, bookLines.length - 1));
+  if (!popup.classList.contains("hidden")) unpin();
+  bookPageEnd = fillForward(linesEl, pos);
   bookSt.pos = pos;
   renderBookCounter();
+}
+
+/* ---- page map: line-index → page, for the page counter and jump slider ---- *
+ * Pages depend on layout (font, line-height, furigana, viewport, vertical), so
+ * the map is (re)built by simulating pagination in an offscreen pane sized and
+ * styled to match the real one, walking the whole book once. Cached by a layout
+ * fingerprint; rebuilt only when that changes. On a long novel this tokenises
+ * every line once — ponytail: bounded, yields to the event loop so the tab
+ * never freezes, and the "paginating…" note shows while it runs.             */
+let bookPages = [0];     // start line index of each page
+let bookMapFp = "";      // fingerprint the current map was built for
+let bookMapping = false;
+let bookMeasure = null;
+
+function bookFingerprint() {
+  const r = linesEl.getBoundingClientRect();
+  const cs = getComputedStyle(linesEl);
+  return [bookSt.name, isVertical(), Math.round(r.width), Math.round(r.height),
+          cs.fontSize, cs.lineHeight, study.furi, !!tokenizer].join("|");
+}
+
+// An offscreen div mirroring the real pane's geometry + typography, plus a
+// styleKid that reproduces the paged `.line` box (the base `.line` CSS rule
+// would otherwise give measurer children chip padding/margins/fit-content).
+function bookMeasurer() {
+  if (!bookMeasure) {
+    bookMeasure = document.createElement("div");
+    bookMeasure.setAttribute("aria-hidden", "true");
+    bookMeasure.style.cssText =
+      "position:fixed;left:-99999px;top:0;overflow:hidden;visibility:hidden;pointer-events:none;";
+    document.body.appendChild(bookMeasure);
+  }
+  const r = linesEl.getBoundingClientRect();
+  const cs = getComputedStyle(linesEl);
+  const m = bookMeasure.style;
+  m.boxSizing = "border-box";
+  m.width = r.width + "px";
+  m.height = r.height + "px";
+  ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+   "fontFamily", "fontSize", "fontWeight", "fontStyle", "lineHeight",
+   "letterSpacing", "writingMode", "textOrientation", "textAlign"].forEach(p => m[p] = cs[p]);
+  const kid = linesEl.querySelector(".line");
+  const ind = kid ? getComputedStyle(kid).textIndent : "1em";
+  const styleKid = div => {
+    div.style.margin = "0"; div.style.padding = "0"; div.style.border = "0";
+    div.style.inlineSize = "auto"; div.style.maxInlineSize = "none";
+    div.style.textIndent = ind;
+  };
+  return { el: bookMeasure, styleKid };
+}
+
+async function buildPageMap() {
+  const fp = bookFingerprint();
+  if (fp === bookMapFp || bookMapping || !bookLines.length) return;
+  bookMapping = true;
+  const { el, styleKid } = bookMeasurer();
+  const pages = [];
+  let i = 0, n = 0;
+  const t0 = Date.now();
+  while (i < bookLines.length) {
+    pages.push(i);
+    const next = fillForward(el, i, styleKid);
+    i = next > i ? next : i + 1;                 // guard against a zero-advance
+    if (++n % 25 === 0) await new Promise(r => setTimeout(r));   // yield
+    if (Date.now() - t0 > 20000) break;          // hard ceiling, never hang
+  }
+  el.innerHTML = "";
+  bookPages = pages.length ? pages : [0];
+  bookMapFp = fp;
+  bookMapping = false;
+  renderBookCounter();
+  syncBookJump();
+}
+
+// Which page (0-based) a line index falls on — largest page-start ≤ pos.
+function bookPageOf(pos) {
+  let lo = 0, hi = bookPages.length - 1, ans = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (bookPages[mid] <= pos) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return ans;
 }
 
 // The page slides in from the direction it was turned (CSS animation).
@@ -1451,16 +1543,20 @@ async function bookTurn(dir) {
 function enterBookView(lines, pos) {
   bookMode = true;
   bookLines = lines;
+  bookPages = [0]; bookMapFp = "";     // fresh book → fresh map
   hint.classList.add("gone");
   linesEl.classList.add("paged");
   bookFooter.classList.remove("hidden");
   renderBookPage(pos);
+  buildPageMap();
 }
 
 function exitBookView() {
   if (!bookMode) return;
   bookMode = false;
   bookLines = [];
+  bookPages = [0]; bookMapFp = "";
+  bookJump.classList.add("hidden");
   linesEl.classList.remove("paged");
   bookFooter.classList.add("hidden");
   if (!popup.classList.contains("hidden")) unpin();
@@ -1469,6 +1565,17 @@ function exitBookView() {
   try { (JSON.parse(localStorage.getItem(SESSION_KEY)) || []).forEach(addLine); } catch (_) {}
   restoring = false;
   hint.classList.toggle("gone", linesEl.children.length > 0);
+}
+
+// Re-page the current line and rebuild the map after any layout change
+// (resize, vertical flip, font/line-height/furigana). Debounced unless the
+// change is a discrete user action we want reflected at once.
+let bookLayoutTimer = null;
+function refreshBookLayout(immediate) {
+  if (!bookMode) return;
+  clearTimeout(bookLayoutTimer);
+  const run = () => { renderBookPage(bookSt.pos); buildPageMap(); };
+  if (immediate) run(); else bookLayoutTimer = setTimeout(run, 160);
 }
 
 /* page-turn inputs: click the far side of the page (Kindle tap zones),
@@ -1520,30 +1627,64 @@ linesEl.addEventListener("touchend", e => {
   bookTurn(next ? 1 : -1);
 }, { passive: true });
 
-// Re-fill the page when the pane geometry changes.
-let bookResizeTimer = null;
-window.addEventListener("resize", () => {
-  if (!bookMode) return;
-  clearTimeout(bookResizeTimer);
-  bookResizeTimer = setTimeout(() => renderBookPage(bookSt.pos), 150);
-});
+// Re-page + remap when the pane geometry or typography changes.
+window.addEventListener("resize", () => refreshBookLayout(false));
 document.addEventListener("vntex-vertical-toggle", () => {
-  if (bookMode) renderBookPage(bookSt.pos);
+  if (bookMode) refreshBookLayout(true);
   else linesEl.scrollTo({ top: linesEl.scrollHeight, left: -linesEl.scrollWidth });
 });
+// Font, line-height, furigana-size changes from the Settings panel.
+document.addEventListener("vntex-appearance-change", () => refreshBookLayout(false));
 
 function renderBookCounter() {
   const open = bookSt.total > 0;
   bookBtn.title = open ? `Reading: ${bookSt.title} — line ${bookSt.pos + 1} of ${bookSt.total}`
                        : "Import an e-book and read it here, with the hover dictionary";
-  if (open) {
-    const pct = Math.round(Math.min(bookPageEnd, bookSt.total) / bookSt.total * 100);
-    bookMsg.textContent = `${bookSt.title} — line ${bookSt.pos + 1} / ${bookSt.total} · ${pct}%`;
-    bookFooter.textContent = `${bookSt.title} · ${pct}%`;
+  if (!open) { bookMsg.innerHTML = BOOK_HINT; return; }
+  const pct = Math.round(Math.min(bookPageEnd, bookSt.total) / bookSt.total * 100);
+  if (bookMapping) {
+    bookMsg.textContent = `${bookSt.title} — paginating… · ${pct}%`;
+    bookFooter.textContent = `${bookSt.title} · paginating… · ${pct}%`;
   } else {
-    bookMsg.innerHTML = BOOK_HINT;
+    const page = bookPageOf(bookSt.pos) + 1;
+    bookMsg.textContent = `${bookSt.title} — p. ${page} / ${bookPages.length} · ${pct}%`;
+    bookFooter.textContent = `${bookSt.title} · p. ${page} / ${bookPages.length} · ${pct}%`;
   }
 }
+
+/* jump-to-page control (Book panel): a slider + a number box, both 1-based. */
+const bookJump = document.getElementById("bookJump");
+const bookJumpRange = document.getElementById("bookJumpRange");
+const bookJumpNum = document.getElementById("bookJumpNum");
+const bookJumpLabel = document.getElementById("bookJumpLabel");
+let bookJumpSaveTimer = null;
+
+// Reflect the current page into the controls (no navigation).
+function syncBookJump() {
+  const pages = bookPages.length;
+  const has = bookMode && pages > 1 && !bookMapping;
+  bookJump.classList.toggle("hidden", !has);
+  if (!has) return;
+  const page = bookPageOf(bookSt.pos) + 1;
+  bookJumpRange.max = bookJumpNum.max = String(pages);
+  bookJumpRange.value = bookJumpNum.value = String(page);
+  bookJumpLabel.textContent = `${page} / ${pages}`;
+}
+
+// Go to a 1-based page. `save` debounced so dragging the slider doesn't spam.
+function bookGoToPage(page, save) {
+  page = Math.max(1, Math.min(page, bookPages.length));
+  renderBookPage(bookPages[page - 1]);
+  bookJumpLabel.textContent = `${page} / ${bookPages.length}`;
+  bookJumpRange.value = bookJumpNum.value = String(page);
+  if (save) {
+    clearTimeout(bookJumpSaveTimer);
+    bookJumpSaveTimer = setTimeout(() => { jpost("/book/pos", { pos: bookSt.pos }).catch(() => {}); }, 300);
+  }
+}
+bookJumpRange.addEventListener("input", () => bookGoToPage(+bookJumpRange.value, false));
+bookJumpRange.addEventListener("change", () => bookGoToPage(+bookJumpRange.value, true));
+bookJumpNum.addEventListener("change", () => bookGoToPage(+bookJumpNum.value || 1, true));
 
 function renderBook(st) {
   if (!st) return;
@@ -1607,7 +1748,7 @@ bookStop.addEventListener("click", async () => {
 function toggleBookPanel(show) {
   const hidden = show === undefined ? !bookPanel.classList.contains("hidden") : !show;
   bookPanel.classList.toggle("hidden", hidden);
-  if (!hidden) refreshBook();
+  if (!hidden) { refreshBook(); syncBookJump(); }
 }
 bookBtn.addEventListener("click", e => { e.stopPropagation(); toggleBookPanel(); });
 document.getElementById("bookClose").addEventListener("click", () => toggleBookPanel(false));

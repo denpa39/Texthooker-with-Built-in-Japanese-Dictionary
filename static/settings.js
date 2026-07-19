@@ -178,6 +178,7 @@
         document.documentElement.style.setProperty("--font-size", r.value + "px");
         showSize();
         save(settings);
+        document.dispatchEvent(new CustomEvent("vntex-appearance-change"));
       });
     });
 
@@ -243,7 +244,11 @@
       if (vertToggle) vertToggle.setAttribute("aria-pressed", String(!!settings.vertical));
     }
 
-    function commit() { apply(settings); save(settings); syncControls(); }
+    function commit() {
+      apply(settings); save(settings); syncControls();
+      // the book reader re-paginates when type metrics change
+      document.dispatchEvent(new CustomEvent("vntex-appearance-change"));
+    }
 
     syncControls();   // initialise control state from saved settings
   }

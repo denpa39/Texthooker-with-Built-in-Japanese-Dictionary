@@ -348,6 +348,21 @@ body {
 }
 .book-footer.hidden { display: none; }
 
+/* Jump-to-page control in the Book panel. */
+.book-jump { margin-top: 6px; }
+.book-jump.hidden { display: none; }
+.book-jump input[type="range"] { width: 100%; accent-color: var(--accent); }
+.book-jump-num {
+  display: flex; align-items: center; gap: 8px; margin-top: 6px;
+  color: var(--muted); font-size: 13px;
+}
+.book-jump-num input[type="number"] {
+  width: 6ch; background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px;
+  font-variant-numeric: tabular-nums;
+}
+#bookJumpLabel { color: var(--text); font-variant-numeric: tabular-nums; text-transform: none; letter-spacing: 0; }
+
 /* Vertical text (tategaki): .vertical on <html> (settings.js). The reader flips
    to right-to-left columns; .line's logical margins/inline-size adapt on their
    own, so only the container's axes need switching. Chrome's scrollLeft is

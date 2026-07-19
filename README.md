@@ -177,10 +177,11 @@ entirely (general word frequency only).
   page at a time, flipped by clicking the far edge of the page, the arrow keys,
   Space, PageUp/PageDown, the mouse wheel, or a swipe on a phone (in vertical
   mode the pages flip right-to-left, like a printed novel). Every word gets the
-  same hover dictionary and furigana as game text, a footer shows your
-  percentage, and your page is saved on every turn and restored when you come
-  back — per book, across sessions. Tip: pick the Mincho font in Settings for
-  the full paperback feel. Ruby furigana in the file is stripped so the reader's own furigana
+  same hover dictionary and furigana as game text, a footer shows the page
+  number and percentage (`p. 12 / 87 · 14%`), and your page is saved on every
+  turn and restored when you come back — per book, across sessions. The Book
+  panel has a **jump-to-page** slider and number box to skip anywhere in the
+  book. Tip: pick the Mincho font in Settings for the full paperback feel. Ruby furigana in the file is stripped so the reader's own furigana
   doesn't double up. (DRM-protected Kindle books and `.pdf` can't be read
   directly — convert to epub with [Calibre](https://calibre-ebook.com/) first.)
 - **Vertical text (tategaki)** — the 縦 toggle in Settings flips the reader to
@@ -218,7 +219,7 @@ entirely (general word frequency only).
 | status dot | Connection state at a glance — green = ready, orange = paused, red = disconnected (hover for the label) |
 | lookup box | Type a word + Enter (romaji or English OK) — dictionary popup without hooking |
 | **Attach** | Hook a running game directly (embedded Textractor) — pick the process, then the text channel |
-| **Book** | Import an e-book (`.epub` / `.mobi` / `.azw` / `.fb2` / `.txt` / `.html`) — opens as a paged Kindle-style reader, place saved per book |
+| **Book** | Import an e-book (`.epub` / `.mobi` / `.azw` / `.fb2` / `.txt` / `.html`) — opens as a paged Kindle-style reader with page numbers + jump-to-page, place saved per book |
 | **Pause** / **Resume** | Stop/continue capture (clipboard + websocket) |
 | **Furigana** | Show readings above kanji |
 | ▤ alignment icons | Text alignment — left, center, right, or justify |

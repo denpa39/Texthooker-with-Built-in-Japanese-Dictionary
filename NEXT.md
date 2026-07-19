@@ -12,6 +12,25 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-07-20, page numbers + jump)
+
+**Real page numbers and jump-to-page.** Footer + Book-panel now show `p. N / M`
+from a page map: bookPages[] = the start line of each page, built by buildPageMap
+running the exact fillForward pagination in an offscreen measurer that mirrors
+the real pane's geometry + typography (width/height/padding/font/line-height/
+writing-mode copied from #lines, paged .line box reset via a styleKid so the base
+.line chip CSS doesn't leak in). Cached by a layout fingerprint (book, vertical,
+paneW, paneH, fontSize, lineHeight, furi, tokenizer-ready); rebuilt via
+refreshBookLayout on resize, vertical toggle, and font/line-height/furigana
+changes (settings.js dispatches vntex-appearance-change). Map build yields every
+25 pages + a 20s hard ceiling so a huge novel never freezes; shows "paginating…"
+meanwhile. Jump UI in the Book panel: a range slider (live preview on input,
+saves on change) + a number box, both 1-based, hidden until a multi-page book is
+open. Verified measurer↔render consistency: page turns land exactly on map
+boundaries across furigana on/off, a 52px font bump (60→240 pages), and vertical
+mode. fillForward extracted from renderBookPage so map and render share one
+pagination path.
+
 ## Done (2026-07-20, book typography)
 
 **Paged mode now LOOKS like a book** (user: "how is this close to books and
