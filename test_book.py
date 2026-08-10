@@ -189,6 +189,19 @@ def main():
     _, ml = book.parse_book(make_mobi(html_jp), "whatever.azw")
     assert ml[0] == "吾輩は猫である。"
 
+    # Truncated/corrupt PalmDB metadata must be a clean parser error, not an
+    # IndexError/struct.error that drops the HTTP import connection.
+    malformed = [
+        b"x" * 60 + b"BOOKMOBI" + b"x" * 8 + struct.pack(">H", 2),
+        make_mobi(html_en)[:90],
+    ]
+    for raw in malformed:
+        try:
+            book.parse_mobi(raw)
+            assert False, "expected ValueError for malformed MOBI"
+        except ValueError:
+            pass
+
     print("test_book: all ok")
 
 
