@@ -217,10 +217,17 @@ def parse_mobi(data):
     if len(data) < 78 or data[60:68] not in (b"BOOKMOBI", b"TEXtREAd"):
         raise ValueError("not a MOBI/PalmDOC file")
     num_recs = struct.unpack(">H", data[76:78])[0]
+    table_end = 78 + 8 * num_recs
+    if not num_recs or table_end > len(data):
+        raise ValueError("invalid MOBI record table")
     offs = [struct.unpack(">I", data[78 + 8 * i:82 + 8 * i])[0] for i in range(num_recs)]
+    if offs != sorted(offs) or offs[0] < table_end or offs[-1] > len(data):
+        raise ValueError("invalid MOBI record offsets")
     offs.append(len(data))
     rec = lambda i: data[offs[i]:offs[i + 1]]
     r0 = rec(0)
+    if len(r0) < 16:
+        raise ValueError("invalid PalmDOC header")
     compression, = struct.unpack(">H", r0[0:2])
     rec_count, = struct.unpack(">H", r0[8:10])
     encryption, = struct.unpack(">H", r0[12:14])
@@ -233,7 +240,11 @@ def parse_mobi(data):
 
     title, codec, extra_flags = "", "cp1252", 0
     if r0[16:20] == b"MOBI":
+        if len(r0) < 32:
+            raise ValueError("invalid MOBI header")
         header_len, = struct.unpack(">I", r0[20:24])
+        if header_len < 16 or 16 + header_len > len(r0):
+            raise ValueError("invalid MOBI header length")
         enc, = struct.unpack(">I", r0[28:32])
         codec = "utf-8" if enc == 65001 else "cp1252"
         if header_len >= 0xE4 and len(r0) >= 16 + 0xE4:

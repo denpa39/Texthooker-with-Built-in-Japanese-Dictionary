@@ -97,6 +97,16 @@ def test_request_allowed():
     check("null origin", ok(Host="127.0.0.1:3939", Origin="null"), False)
 
 
+# ---- Handler JSON bodies: routes require an object ----------------------- #
+def test_json_body():
+    handler = server.Handler.__new__(server.Handler)
+    for raw in (b"[]", b"null", b'"text"', b"{broken"):
+        handler._post_body = raw
+        check(f"non-object JSON {raw!r}", handler._read_json_body(), {})
+    handler._post_body = b'{"pos": 12}'
+    check("object JSON preserved", handler._read_json_body(), {"pos": 12})
+
+
 # ---- romajiToKana: the REAL function pulled out of app.js ------------------ #
 ROMAJI_CASES = [
     ("tabemasu", "たべます"),
@@ -139,6 +149,7 @@ def main():
     test_split()
     test_ws_extract()
     test_request_allowed()
+    test_json_body()
     test_romaji()
     print(f"\n{TOTAL - FAILURES}/{TOTAL} passed")
     return 1 if FAILURES else 0

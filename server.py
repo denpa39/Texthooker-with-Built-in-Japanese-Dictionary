@@ -180,7 +180,8 @@ _PROGRESS_PATH = os.path.join(BOOK_DIR, "progress.json")
 def _book_progress():
     try:
         with open(_PROGRESS_PATH, encoding="utf-8") as f:
-            return json.load(f)
+            progress = json.load(f)
+            return progress if isinstance(progress, dict) else {}
     except (OSError, ValueError):
         return {}
 
@@ -1140,9 +1141,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _read_json_body(self):
         try:
-            return json.loads(self._post_body or b"{}")
-        except Exception:
-            return {}
+            body = json.loads(self._post_body or b"{}")
+        except (TypeError, ValueError):
+            body = {}
+        return body if isinstance(body, dict) else {}
 
     def do_POST(self):
         # Drain the body up front, whether the route wants it or not: on a
