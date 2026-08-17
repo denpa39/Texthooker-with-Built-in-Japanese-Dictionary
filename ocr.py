@@ -286,6 +286,18 @@ _DEFAULT_POPUP_THEME = {
 }
 
 
+def _decode_popup_command(raw):
+    """Decode one popup IPC message explicitly as UTF-8.
+
+    The native child inherits CP932 as ``sys.stdin.encoding`` on Japanese
+    Windows. Reading the parent's UTF-8 pipe through that text wrapper turns
+    every Japanese headword into mojibake while ASCII definitions look fine.
+    """
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    return json.loads(raw)
+
+
 def popup_window_main():
     """Render line-delimited JSON commands from stdin in a no-focus window.
 
@@ -309,11 +321,17 @@ def popup_window_main():
 
     def read_commands():
         try:
-            for raw in sys.stdin:
+            # Bypass TextIOWrapper's locale encoding (usually CP932) and own
+            # the byte-to-text boundary explicitly.
+            input_stream = (os.fdopen(0, "rb", closefd=False) if sys.stdin is None
+                            else getattr(sys.stdin, "buffer", sys.stdin))
+            for raw in input_stream:
                 try:
-                    commands.put(json.loads(raw))
-                except (TypeError, ValueError):
+                    commands.put(_decode_popup_command(raw))
+                except (TypeError, ValueError, UnicodeDecodeError):
                     pass
+        except OSError:
+            pass
         finally:
             commands.put({"quit": True})
 

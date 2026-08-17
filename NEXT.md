@@ -12,6 +12,15 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-08-17, native popup UTF-8 fix)
+
+Japanese popup text no longer becomes mojibake (`縺…`) on Windows. The parent
+writes UTF-8 JSON, but the tkinter child was reading that pipe through the
+machine's CP932 `sys.stdin` wrapper; ASCII definitions survived, masking that the
+headword/reading transport was corrupt. The child now reads raw stdin bytes and
+decodes UTF-8 explicitly, with an fd-0 path for PyInstaller's `--noconsole`
+build. `test_ocr.py` locks a `天使【てんし】` byte round-trip.
+
 ## Done (2026-08-17, popup name-overmatch fix)
 
 The screen popup now compensates for having no kuromoji token boundary. A rare

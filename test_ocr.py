@@ -5,6 +5,7 @@ popup data, edge cleanup, and jitter dedup.
 Needs no dict.sqlite and runs anywhere:
     python test_ocr.py
 """
+import json
 import struct
 import sys
 import threading
@@ -145,6 +146,15 @@ def test_popup_entries():
           rendered[0]["definitions"], ["dream", "hope; wish"])
 
 
+def test_popup_ipc_encoding():
+    command = {"show": True, "entries": [
+        {"word": "天使", "reading": "てんし", "definitions": ["angel"]}
+    ]}
+    raw = json.dumps(command, ensure_ascii=False).encode("utf-8")
+    check("popup UTF-8 pipe preserves Japanese headword and reading",
+          ocr._decode_popup_command(raw), command)
+
+
 def test_modes():
     source = ocr.OcrSource(lambda _text: None, threading.Event(), lambda _text: [])
     check("OCR defaults to reader mode", source.mode, "reader")
@@ -188,7 +198,8 @@ def test_gates():
 
 def main():
     for t in (test_clean, test_same_line, test_meiki_results, test_hover_lookup,
-              test_popup_entries, test_modes, test_png, test_gates):
+              test_popup_entries, test_popup_ipc_encoding, test_modes,
+              test_png, test_gates):
         t()
     print(f"\n{TOTAL - FAILURES}/{TOTAL} passed")
     return 1 if FAILURES else 0
