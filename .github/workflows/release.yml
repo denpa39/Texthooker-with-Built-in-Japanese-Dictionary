@@ -20,11 +20,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # pywebview gets bundled into the app exe (PyInstaller picks up the
-      # function-level `import webview`); without it the app would fall back
-      # to the browser, which is a worse first impression.
+      # pywebview and MeikiOCR are the default app window/OCR paths. The ONNX
+      # models remain outside the exe and download on first OCR start.
       - name: Install build deps
-        run: python -m pip install pyinstaller pywebview
+        run: python -m pip install pyinstaller pywebview "meikiocr>=0.3.4"
       - name: Build app exe
         run: python -m PyInstaller --noconfirm --onefile --noconsole --name DownTheRabbitHole server.py
       - name: Build setup exe
@@ -40,6 +39,7 @@ jobs:
           1. Run RabbitHoleSetup.exe once (downloads the dictionary + tools, ~250 MB).
           2. Run DownTheRabbitHole.exe.
           That's it. Keep both exes in this folder - the downloaded data lives here too.
+          The default MeikiOCR models download automatically the first time OCR starts.
           (If you skip step 1, the app offers to run it for you.)
           "@
           Compress-Archive -Path dist\bundle\* -DestinationPath DownTheRabbitHole-win64.zip

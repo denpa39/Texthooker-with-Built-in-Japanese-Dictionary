@@ -10,9 +10,9 @@ AGENTS.md in the same commit.** It is the substitute for re-reading the project 
 ## What this is
 
 "Down the Rabbit Hole" — a Windows visual-novel texthooker with a built-in offline JMdict
-dictionary. Pure Python **stdlib only** on the server (no required pip dependencies; optional
-`pywebview` for the app window, `wordfreq` at build time, and `meikiocr` / `manga-ocr` for
-better OCR). Vanilla JS frontend, no framework, no bundler.
+dictionary. The server retains a **stdlib-only fallback**, while normal setup installs
+`pywebview` and the default `meikiocr` backend (`wordfreq` remains build-time best-effort;
+`manga-ocr` is an optional fallback). Vanilla JS frontend, no framework, no bundler.
 
 ## Commands
 
@@ -22,13 +22,13 @@ python server.py --no-browser --port 6973   # headless, for testing
 python setup.py                  # one-time: downloads kuromoji, JMdict, JMnedict, KANJIDIC2,
                                  # Textractor; builds dict.sqlite (idempotent; --force rebuilds).
                                  # VN frequency is AUTOMATIC: jiten_vn.zip if present, else
-                                 # Innocent Corpus download (--no-vn-freq opts out); wordfreq +
-                                 # pywebview pip-installed best-effort. server.py OFFERS to run
+                                 # Innocent Corpus download (--no-vn-freq opts out); wordfreq,
+                                 # pywebview + MeikiOCR pip-installed best-effort. server.py OFFERS to run
                                  # this itself when dict.sqlite/kuromoji are missing
                                  # (_run_first_time_setup: console prompt, or Yes/No MessageBox
                                  # + new-console setup when run from pythonw / the frozen exe)
 python setup.py --agent          # opt-in (~120 MB): Agent (0xDC00) into agent/ — emulator hooking
-python setup.py --ocr            # opt-in: install MeikiOCR; ONNX models download on first OCR start
+python setup.py --ocr            # install/verify only the default MeikiOCR backend
 python test_ranking.py           # ranking + /search regression tests (needs dict.sqlite)
 python test_merge.py             # _merge_reads (py) vs mergeReads (js) parity (needs node)
 python test_ocr.py               # OCR pure-logic units (reading order, spans, PNG, gates)
@@ -124,7 +124,8 @@ emulator (PPSSPP/PCSX2/Vita3K/yuzu…) ── Agent GUI (agent/, launched via /a
   SM_*VIRTUALSCREEN — "-fullscreen" only covered the primary monitor; canvas coords =
   screen − (vx,vy), and /ocr/region takes a non-blocking lock so a double-click can't stack
   two overlays), ctypes GDI region screenshot → BMP. Engine preference is `MeikiOcr` when
-  the optional `meikiocr` package is installed (`setup.py --ocr` for source installs): the
+  `meikiocr` package normal setup installs and packaged releases bundle (`setup.py --ocr`
+  installs/verifies only that backend): the
   Meikipop backend detects text lines over the full selected region, batch-recognizes
   characters with confidence/boxes, orders horizontal lines top-down and vertical columns
   right-to-left, filters furigana below 65% of the same-orientation median line size, and

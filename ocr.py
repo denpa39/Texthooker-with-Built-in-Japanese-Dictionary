@@ -876,8 +876,8 @@ class HybridOcr:
 
 
 def make_engine():
-    # Prefer Meikipop's game-specific detector/recognizer when the optional
-    # package is installed. Initialization may still fail offline on first use
+    # Prefer the default-installed Meikipop game-specific detector/recognizer.
+    # Initialization may still fail offline on first use
     # while its models download, so preserve every existing fallback.
     try:
         import meikiocr  # noqa: F401

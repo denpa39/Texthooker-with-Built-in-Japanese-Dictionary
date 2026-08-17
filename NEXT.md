@@ -14,13 +14,15 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 
 ## Done (2026-08-17, Meikipop-style game OCR)
 
-**MeikiOCR is now the preferred optional OCR engine.** `python setup.py --ocr`
-installs Meikipop's game-trained two-stage ONNX backend: whole-region text-line
-detection followed by batched character recognition, with the same 0.5 detection,
+**MeikiOCR is now the default OCR engine.** Normal source setup installs it and
+release/local PyInstaller builds bundle it into the app; `python setup.py --ocr`
+installs or verifies only that backend. Meikipop's game-trained two-stage ONNX
+pipeline performs whole-region text-line detection followed by batched character
+recognition, with the same 0.5 detection,
 0.1 recognition, and punctuation confidence settings. Character boxes drive
 top-to-bottom / vertical right-to-left ordering and median-size furigana removal.
 Complete-frame reads are pixel-cached so the stability confirmation does not run
-ONNX twice. Initialization failure or an absent package preserves the existing
+ONNX twice. Installation or initialization failure preserves the existing
 manga-ocr hybrid → Windows OCR fallback chain. Pure result-shaping tests cover
 furigana filtering, confidence traces, and vertical reading order.
 

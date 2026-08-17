@@ -10,7 +10,7 @@ Pure standard library. Just run:
     python setup.py            # full JMdict (recommended)
     python setup.py --common   # smaller "common words only" edition
     python setup.py --skip-kuromoji   # only rebuild the dictionary DB
-    python setup.py --ocr      # optional game-trained MeikiOCR backend
+    python setup.py --ocr      # install/verify the default MeikiOCR backend only
 
 Re-running skips files that already exist (use --force to redownload).
 """
@@ -683,24 +683,33 @@ def setup_pywebview():
 
 
 def setup_meikiocr():
-    """Install the optional game-trained ONNX OCR backend for source installs.
+    """Install the default game-trained ONNX OCR backend for source installs.
 
     Models are deliberately not downloaded here: meikiocr owns their cache and
     fetches the current detector/recognizers on the first OCR start.
     """
     print("[OCR] game-trained MeikiOCR backend")
     try:
-        import meikiocr  # noqa: F401
-        print("  meikiocr already installed; its models download on first OCR start\n")
-        return
+        import meikiocr
+        version = tuple(int(part) for part in
+                        getattr(meikiocr, "__version__", "0").split(".")[:3])
+        if version >= (0, 3, 4):
+            print("  meikiocr already installed; its models download on first OCR start\n")
+            return
+        print("  upgrading meikiocr to the supported release...")
     except ImportError:
         pass
+    except ValueError:
+        print("  replacing an unrecognized meikiocr release...")
     if getattr(sys, "frozen", False):
-        print("  the packaged setup app cannot add Python modules. For now this "
-              "optional backend needs a source install and `python setup.py --ocr`.\n")
+        # Official packaged builds include meikiocr in DownTheRabbitHole.exe;
+        # RabbitHoleSetup.exe only prepares its external data files.
+        print("  meikiocr is bundled into the packaged app; its models download "
+              "on first OCR start\n")
         return
     try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "meikiocr"])
+        subprocess.check_call([sys.executable, "-m", "pip", "install",
+                               "meikiocr>=0.3.4"])
         print("  meikiocr installed; its models download on first OCR start\n")
     except Exception as e:
         print(f"  meikiocr install failed ({e}); Windows OCR and manga-ocr remain available\n")
@@ -756,7 +765,7 @@ def main():
                     help="only download Agent (~120 MB) for emulator hooking "
                          "(PPSSPP / PCSX2 / Vita3K / yuzu…)")
     ap.add_argument("--ocr", action="store_true",
-                    help="only install the optional game-trained MeikiOCR backend")
+                    help="only install/verify the default game-trained MeikiOCR backend")
     args = ap.parse_args()
 
     print("Down the Rabbit Hole - setup\n" + "=" * 28)
@@ -770,8 +779,9 @@ def main():
         setup_meikiocr()
         return
     print("Downloads the tokenizer, dictionaries and the hooking engine, then\n"
-          "builds the lookup database. Roughly 250 MB of downloads, one time;\n"
-          "everything lands next to this script. Steps already done are skipped.\n")
+          "builds the lookup database and installs MeikiOCR. Core data is roughly\n"
+          "250 MB; OCR models download separately on first OCR start.\n"
+          "Everything lands next to this script. Steps already done are skipped.\n")
     if not args.skip_kuromoji:
         setup_kuromoji(force=args.force)
     setup_dictionary(common=args.common, force=args.force, freq_zip=args.freq,
@@ -782,13 +792,13 @@ def main():
     setup_kanji(force=args.force)
     if not args.no_textractor:
         setup_textractor(force=args.force)
+    setup_meikiocr()
     setup_pywebview()
     if getattr(sys, "frozen", False):
         print("Done!  Start the app with DownTheRabbitHole.exe")
     else:
         print("Done!  Start the app with run.bat  (or: python server.py)")
-    print("Optional extras: emulator hooking `setup.py --agent` (~120 MB), "
-          "game-trained OCR `setup.py --ocr` — see README.")
+    print("Optional extra: emulator hooking `setup.py --agent` (~120 MB) — see README.")
 
 
 if __name__ == "__main__":

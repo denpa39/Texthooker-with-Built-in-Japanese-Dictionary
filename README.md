@@ -86,13 +86,14 @@ Some engines defeat every hook. Plan B, built in:
    partial lines from typewriter animations are filtered out, and the area is
    remembered across restarts.
 
-For the best local recognition in a source install, run `python setup.py --ocr`.
-This installs [MeikiOCR](https://github.com/rtr46/meikiocr), the backend used by
-Meikipop: a fast ONNX text-line detector plus character recognizer trained for
+Normal setup installs [MeikiOCR](https://github.com/rtr46/meikiocr), the backend
+used by Meikipop, and packaged releases bundle it into the app. It is the default
+OCR engine: a fast ONNX text-line detector plus character recognizer trained for
 Japanese video games. Its models download on the first OCR start, it uses an
 NVIDIA GPU automatically when `onnxruntime-gpu` is installed, and it does not
 need the Windows Japanese language pack. Detected character geometry is also
-used to order lines and suppress small furigana detections.
+used to order lines and suppress small furigana detections. `python setup.py
+--ocr` remains available to install or verify just this backend.
 
 Without MeikiOCR, recognition falls back automatically to the existing chain:
 Windows' built-in Japanese OCR (needs the Japanese language pack under Settings
@@ -100,8 +101,7 @@ Windows' built-in Japanese OCR (needs the Japanese language pack under Settings
 when installed (`pip install manga-ocr`, ~400 MB with torch). In the manga-ocr
 path Windows OCR still finds *where* text is and gates empty frames; manga-ocr is
 generative and can hallucinate on whole screenshots, so it only receives tight
-detected line crops. Nothing changes for existing installs unless MeikiOCR is
-explicitly installed.
+detected line crops.
 
 **Tip:** click a word to pin its popup open; press **Esc** to close. Hover gives a quick peek.
 
@@ -262,7 +262,7 @@ next time you open the page — no flash of the wrong theme on load.
 python setup.py --common     # smaller "common words only" dictionary
 python setup.py --force      # redownload + rebuild everything
 python setup.py --skip-kuromoji   # only rebuild the dictionary DB
-python setup.py --ocr        # install the optional game-trained MeikiOCR backend
+python setup.py --ocr        # install/verify only the default MeikiOCR backend
 ```
 
 ## Server options
@@ -276,7 +276,7 @@ python server.py --no-browser    # serve only; open nothing
 python setup.py --textractor     # (re)download only the embedded Textractor
 python setup.py --no-textractor  # skip Textractor during setup
 python setup.py --agent          # download Agent (~120 MB) for emulator hooking
-python setup.py --ocr            # install MeikiOCR (source installs; models fetch on first use)
+python setup.py --ocr            # install/verify MeikiOCR only
 ```
 
 ## Packaging (one-exe for non-Python users)
@@ -284,8 +284,9 @@ python setup.py --ocr            # install MeikiOCR (source installs; models fet
 `build_exe.bat` builds `DownTheRabbitHole.exe` + `RabbitHoleSetup.exe` with
 PyInstaller. Ship both in one folder: the user runs the setup exe once (it
 downloads the tokenizer, dictionaries and Textractor next to itself), then the
-app exe. The data stays outside the exe, so dictionary rebuilds don't mean
-re-downloading the app.
+app exe. MeikiOCR is bundled into the app; its ONNX models download into their
+cache on first OCR start. Dictionary/tokenizer data stays outside the exe, so
+dictionary rebuilds don't mean re-downloading the app.
 
 Pushing a tag (`git tag v1.0 && git push --tags`) builds the same pair on CI
 (`.github/workflows/release.yml`) and attaches **DownTheRabbitHole-win64.zip**
@@ -333,5 +334,5 @@ to the GitHub release — that's what the "no Python needed" install path uses.
   `agent/`, launched as a separate app; its community game scripts are MIT).
 - VN frequency: **jiten.moe** — CC BY-SA 4.0.
 - Kanji info: **KANJIDIC2** (EDRDG licence).
-- Optional game OCR: **meikiocr** code — Apache-2.0; downloaded
+- Default game OCR: **meikiocr** code — Apache-2.0; downloaded
   `meiki.text.detect.v0` and `meiki.txt.recognition.v0` ONNX models — LGPL-3.0.
