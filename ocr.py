@@ -709,10 +709,52 @@ def _hit_text(lines, screen_x, screen_y, region):
     return min(hits, default=(None, None), key=lambda hit: hit[0])[1]
 
 
+_POPUP_PARTICLE_CHARS = set("はがをにでとへもやのかねよ")
+
+
+def _popup_candidates(candidates):
+    """Remove name noise caused by popup OCR having no tokenizer boundary.
+
+    ``scan()`` normally receives kuromoji's hovered token. Popup OCR only has a
+    character suffix, so a name such as 夢か (Yumeka) can consume the following
+    question particle and outrank the common word 夢. Discard that narrow class
+    of kana-only name overmatch. If the resulting winner is a real word, also
+    hide same-spelling personal names (夢 = Ayumi, etc.) in the compact popup.
+    Pure-name hits and katakana names such as レオン remain untouched.
+    """
+    candidates = list(candidates or [])
+    established_words = [candidate for candidate in candidates
+                         if candidate.get("kind") == "word"
+                         and (candidate.get("entry", {}).get("c") or
+                              isinstance(candidate.get("entry", {}).get("vr"), int)
+                              and candidate["entry"]["vr"] <= 6600)]
+
+    def particle_name_overmatch(candidate):
+        if candidate.get("kind") != "name":
+            return False
+        matched = candidate.get("matched") or ""
+        for word in established_words:
+            base = word.get("matched") or ""
+            extension = matched[len(base):] if base and matched.startswith(base) else ""
+            if 0 < len(extension) <= 2 and all(ch in _POPUP_PARTICLE_CHARS
+                                               for ch in extension):
+                return True
+        return False
+
+    candidates = [candidate for candidate in candidates
+                  if not particle_name_overmatch(candidate)]
+    if candidates and candidates[0].get("kind") == "word":
+        surface = candidates[0].get("matched")
+        candidates = [candidate for candidate in candidates
+                      if not (candidate.get("kind") == "name"
+                              and candidate.get("matched") == surface)]
+    return candidates
+
+
 def _popup_entries(candidates, limit=3):
     """Reduce scan-shaped dictionary results to compact native-popup data."""
     rendered = []
-    for candidate in candidates or []:
+    for candidate in _popup_candidates(candidates):
         entry = candidate.get("entry") or {}
         senses = entry.get("s") or []
         readings = entry.get("r") or []

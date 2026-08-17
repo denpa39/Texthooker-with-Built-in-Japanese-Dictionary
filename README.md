@@ -88,7 +88,8 @@ Some engines defeat every hook. Plan B has two switchable display modes:
    characters inside the selected area. The definition follows the pointer in a
    no-focus overlay; turn Caps Lock off to hide it. The selected area is shared
    by both modes and remembered across restarts. Popup lookups are not appended
-   to the reader or session logs.
+   to the reader or session logs. The compact popup favours ordinary vocabulary
+   over same-spelling personal-name noise, while still showing pure name hits.
 
 Normal setup installs [MeikiOCR](https://github.com/rtr46/meikiocr), the backend
 used by Meikipop, and packaged releases bundle it into the app. It is the default

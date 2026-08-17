@@ -21,6 +21,7 @@ except Exception:
     pass
 
 import server
+import ocr
 
 # (label, text, pos, reading, base, surface, want_kind, want_substr)
 #   the tuple mirrors what static/app.js sends to /scan for the hovered token;
@@ -174,6 +175,18 @@ def main():
     else:
         heads = [(c["entry"].get("k") or c["entry"].get("r") or ["?"])[0] for c in partial]
         print(f"FAIL  katakana prefix-match drop: got sub-token matches {heads[:3]}")
+        failures += 1
+
+    # Screen-popup OCR has no kuromoji boundary: 夢か means "dream?", not the
+    # rare personal name 夢か (Yumeka). The compact popup must suppress that
+    # particle overmatch and the same-kanji name cluster below the real word.
+    total += 1
+    popup = ocr._popup_entries(server.scan("夢か…"))
+    if popup and popup[0]["word"] == "夢" and popup[0]["definitions"][0] == "dream" \
+            and all(entry.get("tag") != "name" for entry in popup):
+        print("PASS  popup 夢か -> 夢 'dream' (no Yumeka/Ayumi name noise)")
+    else:
+        print(f"FAIL  popup 夢か: got {popup[:3]}")
         failures += 1
 
     print(f"\n{total - failures}/{total} passed")

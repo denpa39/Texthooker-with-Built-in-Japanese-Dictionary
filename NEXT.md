@@ -12,6 +12,15 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-08-17, popup name-overmatch fix)
+
+The screen popup now compensates for having no kuromoji token boundary. A rare
+name may no longer consume a trailing kana particle and bury an established
+word (`夢か……` now opens `夢【ゆめ】 dream`, not the name `夢か【ゆめか】 Yumeka`).
+When a real word wins, same-spelling personal-name entries are also suppressed
+in the compact native popup; pure-name and katakana-name hits remain available.
+The exact screenshot regression is locked in `test_ocr.py` and `test_ranking.py`.
+
 ## Done (2026-08-17, switchable OCR reader + screen popup)
 
 Screen OCR now has two live-switchable presentation modes backed by the same

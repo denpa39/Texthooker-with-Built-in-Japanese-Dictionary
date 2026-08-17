@@ -120,6 +120,24 @@ def test_popup_entries():
           ["to eat; to consume"])
     check("popup labels inflection", rendered[0]["tag"], "inflected: past")
 
+    dream = {"matched": "夢", "len": 1, "kind": "word", "reasons": [],
+             "entry": {"k": ["夢"], "r": ["ゆめ"], "c": True, "vr": 474,
+                       "s": [{"gloss": ["dream"], "misc": []}]}}
+    candidates = [
+        {"matched": "夢か", "len": 2, "kind": "name", "reasons": [],
+         "entry": {"k": ["夢か"], "r": ["ゆめか"],
+                   "s": [{"gloss": ["Yumeka"]}]}},
+        dream,
+        {"matched": "夢", "len": 1, "kind": "name", "reasons": [],
+         "entry": {"k": ["夢"], "r": ["あゆみ"],
+                   "s": [{"gloss": ["Ayumi"]}]}}
+    ]
+    rendered = ocr._popup_entries(candidates)
+    check("question particle cannot create a longer person-name hit",
+          [entry["word"] for entry in rendered], ["夢"])
+    check("common word definition wins the compact popup",
+          rendered[0]["definitions"], ["dream"])
+
 
 def test_modes():
     source = ocr.OcrSource(lambda _text: None, threading.Event(), lambda _text: [])
