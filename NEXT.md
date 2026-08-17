@@ -12,6 +12,20 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-08-17, fullscreen popup OCR performance)
+
+Screen-popup OCR no longer captures and recognizes the entire selected region
+every 80 ms. It retains a 1024x640 hover-centred tile (full resolution for
+smaller text-box selections), recentres only near tile edges, checks static
+pixels cheaply, and adaptively limits changed-frame ONNX work to roughly 25%
+model duty. Character hit-testing and dictionary changes still run every popup
+loop against cached geometry. Live GDI pixels now feed MeikiOCR directly as BGR
+arrays, removing the multi-megabyte temp-BMP write/read/decode round-trip from
+both OCR modes. The native popup also caches layout/rounded-region work and the
+parent stops sending a new IPC layout command for every mouse pixel. On this
+PC's saved 1919x1079 region, capture+hash alone fell from 26.1 ms to 11.2 ms per
+check (57%) before the larger detector/recognizer savings.
+
 ## Done (2026-08-17, unified dictionary popup design)
 
 The native Screen popup now shares the in-app dictionary's visual hierarchy

@@ -94,6 +94,10 @@ Some engines defeat every hook. Plan B has two switchable display modes:
    the mouse wheel to scroll the popup without focusing it or the game. Its
    rounded themed card mirrors the in-app dictionary layout: Mincho headword,
    reading, frequency/name chips, POS labels, and numbered modern senses.
+   Large/fullscreen selections stay responsive by OCRing only a 1024x640 tile
+   around the pointer; moving near its edge recentres the tile. Animated scenes
+   use an adaptive recognition cooldown instead of keeping ONNX busy every
+   frame, while mouse hit-testing continues at full speed between reads.
 
 Normal setup installs [MeikiOCR](https://github.com/rtr46/meikiocr), the backend
 used by Meikipop, and packaged releases bundle it into the app. It is the default

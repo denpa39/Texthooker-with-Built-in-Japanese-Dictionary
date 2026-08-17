@@ -23,7 +23,6 @@ import re
 import struct
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import zlib
@@ -31,7 +30,6 @@ import zlib
 BASE_DIR = (os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, "frozen", False)
             else os.path.dirname(os.path.abspath(__file__)))
 REGION_PATH = os.path.join(BASE_DIR, "ocr_region.json")
-_TMP_BMP = os.path.join(tempfile.gettempdir(), "rabbithole_ocr.bmp")
 
 if sys.platform == "win32":
     from ctypes import wintypes
@@ -76,9 +74,11 @@ def save_region(r):
 # --------------------------------------------------------------------------- #
 # Screen capture (GDI): region -> 32-bit top-down BMP file + raw pixels
 # --------------------------------------------------------------------------- #
-def capture_bmp(x, y, w, h, path, scale=None):
-    """Screenshot the region into a .bmp; returns the raw pixel bytes (for the
-    cheap changed-frame hash). Windows only.
+def capture_bmp(x, y, w, h, path=None, scale=None):
+    """Capture a region as raw BGRA; optionally also write it as a BMP.
+
+    The returned bytes feed the cheap changed-frame hash and MeikiOCR directly.
+    Windows only.
 
     MeikiOCR performs its own fixed-size detection/recognition preprocessing,
     so the live OCR capture stays 1:1. Pass `scale` explicitly (may be < 1) to
@@ -107,10 +107,11 @@ def capture_bmp(x, y, w, h, path, scale=None):
         gdi32.DeleteObject(bmp)
         gdi32.DeleteDC(mem)
         user32.ReleaseDC(None, hdc)
-    with open(path, "wb") as f:
-        f.write(struct.pack("<2sIHHI", b"BM", 54 + len(pixels), 0, 0, 54))
-        f.write(bytes(bih))
-        f.write(pixels)
+    if path:
+        with open(path, "wb") as f:
+            f.write(struct.pack("<2sIHHI", b"BM", 54 + len(pixels), 0, 0, 54))
+            f.write(bytes(bih))
+            f.write(pixels)
     return pixels
 
 
@@ -168,11 +169,6 @@ def _encode_png(pixels_bgra, w, h):
             chunk(b"IEND", b""))
 
 
-_TMP_SNAP = os.path.join(tempfile.gettempdir(), "rabbithole_snap.bmp")
-# ^ NOT _TMP_BMP: /snap runs on an HTTP thread while the OCR loop keeps
-# rewriting _TMP_BMP — sharing the path would corrupt an in-flight OCR read.
-
-
 def snap_window_png(region=None, pid=None):
     """PNG bytes of the whole game window: the window under the OCR region's
     center, else the hooked process's biggest visible window. None when
@@ -192,7 +188,7 @@ def snap_window_png(region=None, pid=None):
         return None
     scale = min(1.0, 1280 / w)    # cards don't need 4K; keeps PNGs ~100-400 KB
     try:
-        px = capture_bmp(x, y, w, h, _TMP_SNAP, scale=scale)
+        px = capture_bmp(x, y, w, h, scale=scale)
     except Exception:
         return None
     return _encode_png(px, int(w * scale), int(h * scale))
@@ -404,6 +400,7 @@ def popup_window_main():
     threading.Thread(target=read_commands, daemon=True).start()
     content_key = None
     popup_state = {"visible": False, "scrollable": False}
+    layout_state = {"key": None, "width": 260, "height": 50}
     mouse_hook = {"handle": None, "callback": None}
     pending_scroll = collections.deque()
 
@@ -528,19 +525,25 @@ def popup_window_main():
         canvas.yview_moveto(0)
 
     def place(command):
-        root.update_idletasks()
-        content_width = content.winfo_reqwidth()
-        content_height = content.winfo_reqheight()
-        popup_state["scrollable"] = content_height + 2 > 520
-        if popup_state["scrollable"]:
-            scrollbar.pack(side="right", fill="y")
+        layout_changed = layout_state["key"] != content_key
+        was_visible = popup_state["visible"]
+        if layout_changed:
             root.update_idletasks()
-            scroll_width = scrollbar.winfo_reqwidth()
-        else:
-            scrollbar.pack_forget()
-            scroll_width = 0
-        width = max(260, min(480, content_width + scroll_width + 2))
-        height = max(50, min(520, content_height + 2))
+            content_width = content.winfo_reqwidth()
+            content_height = content.winfo_reqheight()
+            popup_state["scrollable"] = content_height + 2 > 520
+            if popup_state["scrollable"]:
+                scrollbar.pack(side="right", fill="y")
+                root.update_idletasks()
+                scroll_width = scrollbar.winfo_reqwidth()
+            else:
+                scrollbar.pack_forget()
+                scroll_width = 0
+            layout_state["key"] = content_key
+            layout_state["width"] = max(
+                260, min(480, content_width + scroll_width + 2))
+            layout_state["height"] = max(50, min(520, content_height + 2))
+        width, height = layout_state["width"], layout_state["height"]
         try:
             gsm = ctypes.windll.user32.GetSystemMetrics
             vx, vy, vw, vh = gsm(76), gsm(77), gsm(78), gsm(79)
@@ -576,11 +579,14 @@ def popup_window_main():
         x = max(vx, min(x, vx + vw - width))
         y = max(vy, min(y, vy + vh - height))
         root.geometry(f"{width}x{height}{x:+d}{y:+d}")
-        apply_no_activate_flags(width, height)
-        root.deiconify()
-        root.lift()
-        root.update_idletasks()
-        draw_scrollbar(*canvas.yview())
+        if layout_changed:
+            apply_no_activate_flags(width, height)
+        if not was_visible:
+            root.deiconify()
+            root.lift()
+        if layout_changed or not was_visible:
+            root.update_idletasks()
+            draw_scrollbar(*canvas.yview())
         popup_state["visible"] = True
 
     def scroll_popup(event):
@@ -853,14 +859,32 @@ class MeikiOcr:
                  for line in lines]
         return "\n".join(line["text"] for line in lines), trace, hover
 
-    def recognize(self, bmp_path):
-        try:
-            with open(bmp_path, "rb") as image_file:
-                data = image_file.read()
-        except OSError:
-            self.line_trace = []
-            self.hover_lines = []
-            return ""
+    def recognize(self, bmp_path=None, pixels=None, width=None, height=None):
+        """Recognize a BMP or an in-memory GDI BGRA frame.
+
+        Live monitoring already owns the raw pixels for change detection. Going
+        through a temporary multi-megabyte BMP and decoding it again made large
+        regions pay avoidable disk + codec work on every model pass.
+        """
+        if pixels is not None and isinstance(width, int) and isinstance(height, int):
+            data = pixels
+            try:
+                bgra = self._np.frombuffer(data, dtype=self._np.uint8).reshape(
+                    (height, width, 4))
+                image = self._np.ascontiguousarray(bgra[:, :, :3])
+            except (ValueError, TypeError):
+                image = None
+        else:
+            try:
+                with open(bmp_path, "rb") as image_file:
+                    data = image_file.read()
+            except (OSError, TypeError):
+                self.line_trace = []
+                self.hover_lines = []
+                return ""
+            image = self._cv2.imdecode(
+                self._np.frombuffer(data, dtype=self._np.uint8), self._cv2.IMREAD_COLOR)
+
         key = hashlib.md5(data).digest()
         cached = self._cache.get(key)
         if cached is not None:
@@ -868,8 +892,6 @@ class MeikiOcr:
             text, self.line_trace, self.hover_lines = cached
             return text
 
-        image = self._cv2.imdecode(
-            self._np.frombuffer(data, dtype=self._np.uint8), self._cv2.IMREAD_COLOR)
         if image is None:
             self.line_trace = []
             self.hover_lines = []
@@ -912,6 +934,40 @@ def _cursor_pos():
         return None
     point = wintypes.POINT()
     return (point.x, point.y) if user32.GetCursorPos(ctypes.byref(point)) else None
+
+
+_POPUP_SCAN_MAX_W = 1024
+_POPUP_SCAN_MAX_H = 640
+_POPUP_SCAN_EDGE = 72
+
+
+def _popup_scan_region(region, cursor):
+    """A hover-centred OCR tile inside the selected region.
+
+    Popup lookup only needs the text around the pointer, not every animated
+    pixel in a fullscreen game. Keeping one third of the tile before the cursor
+    leaves ample suffix context to its right/below for horizontal/vertical text.
+    """
+    width = min(region["w"], _POPUP_SCAN_MAX_W)
+    height = min(region["h"], _POPUP_SCAN_MAX_H)
+    local_x = cursor[0] - region["x"]
+    local_y = cursor[1] - region["y"]
+    left = max(0, min(local_x - width // 3, region["w"] - width))
+    top = max(0, min(local_y - height // 3, region["h"] - height))
+    return {"x": region["x"] + left, "y": region["y"] + top,
+            "w": width, "h": height}
+
+
+def _popup_scan_covers(scan, region, cursor):
+    """Whether the cursor remains safely inside an existing OCR tile."""
+    left_pad = 0 if scan["x"] <= region["x"] else _POPUP_SCAN_EDGE
+    top_pad = 0 if scan["y"] <= region["y"] else _POPUP_SCAN_EDGE
+    right_pad = (0 if scan["x"] + scan["w"] >= region["x"] + region["w"]
+                 else _POPUP_SCAN_EDGE)
+    bottom_pad = (0 if scan["y"] + scan["h"] >= region["y"] + region["h"]
+                  else _POPUP_SCAN_EDGE)
+    return (scan["x"] + left_pad <= cursor[0] < scan["x"] + scan["w"] - right_pad
+            and scan["y"] + top_pad <= cursor[1] < scan["y"] + scan["h"] - bottom_pad)
 
 
 def _hit_text(lines, screen_x, screen_y, region):
@@ -1264,6 +1320,12 @@ class OcrSource:
             recent = collections.deque(maxlen=6)   # (key, raw) of recent publishes
             last_mode = None
             popup_hash = None
+            popup_scan = None
+            next_popup_read = 0.0
+            popup_shown = False
+            popup_anchor = None
+            last_popup_theme = None
+            last_popup_region = None
             hover_lines = []
             last_lookup = None
             popup_entries = []
@@ -1275,6 +1337,12 @@ class OcrSource:
                         popup.close()
                     last_mode = mode
                     last_hash = popup_hash = None
+                    popup_scan = None
+                    next_popup_read = 0.0
+                    popup_shown = False
+                    popup_anchor = None
+                    last_popup_theme = None
+                    last_popup_region = None
                     hover_lines = []
                     last_lookup = None
                     popup_entries = []
@@ -1284,6 +1352,10 @@ class OcrSource:
                 time.sleep(0.08 if mode == "popup" else 0.3)
                 if self._paused.is_set():
                     popup.hide()
+                    popup_shown = False
+                    if mode == "popup":
+                        popup_scan = None
+                        hover_lines = []
                     continue
                 r = self.region
 
@@ -1293,47 +1365,102 @@ class OcrSource:
                     cursor = _cursor_pos()
                     if not caps_on or cursor is None:
                         popup.hide()
+                        popup_shown = False
+                        popup_scan = None
+                        hover_lines = []
+                        last_lookup = None
+                        popup_entries = []
                         continue
                     if not (r["x"] <= cursor[0] < r["x"] + r["w"] and
                             r["y"] <= cursor[1] < r["y"] + r["h"]):
                         popup.hide()
+                        popup_shown = False
+                        popup_anchor = None
+                        popup_scan = None
+                        hover_lines = []
                         last_lookup = None
                         popup_entries = []
                         continue
-                    try:
-                        px = capture_bmp(r["x"], r["y"], r["w"], r["h"], _TMP_BMP)
-                    except Exception:
-                        popup.hide()
-                        continue
-                    frame_hash = hashlib.md5(px).digest()
-                    if frame_hash != popup_hash:
-                        popup_hash = frame_hash
-                        text = _clean(engine.recognize(_TMP_BMP))
-                        hover_lines = engine.hover_lines
-                        self.trace["read"] = text
-                        self.trace["lines"] = engine.line_trace
-                    lookup_text = _hit_text(hover_lines, cursor[0], cursor[1], r)
+                    region_key = (r["x"], r["y"], r["w"], r["h"])
+                    if (last_popup_region != region_key or popup_scan is None
+                            or not _popup_scan_covers(popup_scan, r, cursor)):
+                        popup_scan = _popup_scan_region(r, cursor)
+                        last_popup_region = region_key
+                        popup_hash = None
+                        next_popup_read = 0.0
+                        hover_lines = []
+                        last_lookup = None
+                        popup_entries = []
+                        popup_shown = False
+
+                    now = time.monotonic()
+                    if now >= next_popup_read:
+                        try:
+                            px = capture_bmp(popup_scan["x"], popup_scan["y"],
+                                             popup_scan["w"], popup_scan["h"])
+                        except Exception:
+                            popup.hide()
+                            popup_shown = False
+                            continue
+                        frame_hash = hashlib.md5(px).digest()
+                        if frame_hash != popup_hash:
+                            popup_hash = frame_hash
+                            started = time.monotonic()
+                            text = _clean(engine.recognize(
+                                pixels=px, width=popup_scan["w"],
+                                height=popup_scan["h"]))
+                            elapsed = time.monotonic() - started
+                            # Animated fullscreen scenes used to keep ONNX busy
+                            # continuously. Bound model duty cycle near 25%; a
+                            # static frame is still checked cheaply five times/s.
+                            next_popup_read = time.monotonic() + max(
+                                0.30, min(1.50, elapsed * 3.0))
+                            hover_lines = engine.hover_lines
+                            self.trace["read"] = text
+                            self.trace["lines"] = engine.line_trace
+                            self.trace["ocr_ms"] = round(elapsed * 1000)
+                            self.trace["scan_region"] = popup_scan
+                        else:
+                            next_popup_read = now + 0.20
+                    lookup_text = _hit_text(
+                        hover_lines, cursor[0], cursor[1], popup_scan)
                     self.trace["hover"] = lookup_text
                     if not lookup_text:
                         popup.hide()
+                        popup_shown = False
+                        popup_anchor = None
                         last_lookup = None
                         popup_entries = []
                         continue
-                    if lookup_text != last_lookup:
+                    lookup_changed = lookup_text != last_lookup
+                    if lookup_changed:
                         last_lookup = lookup_text
                         candidates = self._lookup(lookup_text) if self._lookup else []
                         popup_entries = _popup_entries(candidates)
                     if popup_entries:
-                        if not popup.send({"show": True, "x": cursor[0], "y": cursor[1],
-                                           "region": r, "entries": popup_entries,
-                                           "theme": self.popup_theme}):
-                            raise RuntimeError("the on-screen OCR popup could not start")
+                        theme_key = tuple(sorted(self.popup_theme.items()))
+                        moved_far = (popup_anchor is not None and
+                                     abs(cursor[0] - popup_anchor[0]) +
+                                     abs(cursor[1] - popup_anchor[1]) > 160)
+                        if (lookup_changed or not popup_shown or moved_far
+                                or theme_key != last_popup_theme):
+                            if not popup.send({"show": True, "x": cursor[0],
+                                               "y": cursor[1], "region": r,
+                                               "entries": popup_entries,
+                                               "theme": self.popup_theme}):
+                                raise RuntimeError(
+                                    "the on-screen OCR popup could not start")
+                            popup_shown = True
+                            popup_anchor = cursor
+                            last_popup_theme = theme_key
                     else:
                         popup.hide()
+                        popup_shown = False
+                        popup_anchor = None
                     continue
 
                 try:
-                    px = capture_bmp(r["x"], r["y"], r["w"], r["h"], _TMP_BMP)
+                    px = capture_bmp(r["x"], r["y"], r["w"], r["h"])
                 except Exception:
                     continue
                 h = hashlib.md5(px).digest()
@@ -1347,7 +1474,8 @@ class OcrSource:
                 # A new MeikiOCR result must repeat among the last two reads.
                 # Its frame cache makes the frozen-frame confirmation cheap,
                 # while mid-typewriter frames keep changing and never qualify.
-                text = _clean(engine.recognize(_TMP_BMP))
+                text = _clean(engine.recognize(
+                    pixels=px, width=r["w"], height=r["h"]))
                 self.trace["peek"] = text
                 if not _has_japanese(text):
                     seen.clear()

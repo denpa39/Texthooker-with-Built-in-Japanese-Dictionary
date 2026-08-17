@@ -108,6 +108,21 @@ def test_hover_lookup():
     check("vertical hover uses the y axis",
           ocr._hit_text(vertical, 115, 250, region), "き")
 
+    fullscreen = {"x": 0, "y": 0, "w": 3840, "h": 2160}
+    tile = ocr._popup_scan_region(fullscreen, (1920, 1080))
+    check("fullscreen popup OCR uses a bounded local tile",
+          (tile["w"], tile["h"]), (1024, 640))
+    check("hover tile leaves suffix context after the pointer",
+          (1920 - tile["x"], 1080 - tile["y"]), (341, 213))
+    check("cursor stays inside the reusable hover tile",
+          ocr._popup_scan_covers(tile, fullscreen, (2000, 1100)), True)
+    check("cursor near a tile edge requests a fresh OCR tile",
+          ocr._popup_scan_covers(tile, fullscreen,
+                                 (tile["x"] + tile["w"] - 20, 1100)), False)
+    small = {"x": 100, "y": 200, "w": 600, "h": 180}
+    check("normal text-box selections still scan at full resolution",
+          ocr._popup_scan_region(small, (400, 250)), small)
+
 
 def test_popup_entries():
     candidates = [{"matched": "食べた", "kind": "word", "reasons": ["past"],
