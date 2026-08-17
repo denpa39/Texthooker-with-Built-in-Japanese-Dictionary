@@ -85,6 +85,26 @@ def test_meiki_results():
     text, _, _ = ocr.MeikiOcr._format_results(vertical)
     check("vertical meiki columns read right-to-left", text, "右列\n左列")
 
+    diagonal_fragments = [
+        {"text": "自", "chars": chars("自", 10, 60, 24), "is_vertical": False},
+        {"text": "分の", "chars": [
+            {"char": "分", "bbox": [38, 54, 62, 78], "conf": 0.9},
+            {"char": "の", "bbox": [66, 48, 90, 72], "conf": 0.9},
+        ], "is_vertical": False},
+    ]
+    text, _, hover = ocr.MeikiOcr._format_results(diagonal_fragments)
+    check("large tilted detector fragments merge into one word", text, "自分の")
+    check("merged fragment hover keeps the following word suffix",
+          ocr._hit_text(hover, 50, 66, {"x": 0, "y": 0, "w": 200, "h": 120}),
+          "分の")
+
+    separate_lines = [
+        {"text": "上段", "chars": chars("上段", 10, 10, 20), "is_vertical": False},
+        {"text": "下段", "chars": chars("下段", 10, 55, 20), "is_vertical": False},
+    ]
+    text, _, hover = ocr.MeikiOcr._format_results(separate_lines)
+    check("nearby parallel lines do not merge", (text, len(hover)), ("上段\n下段", 2))
+
 
 def test_hover_lookup():
     horizontal = [{"text": "日本語", "vertical": False, "chars": [
@@ -171,6 +191,16 @@ def test_popup_entries():
           [entry["word"] for entry in rendered], ["夢"])
     check("common word definition wins the compact popup",
           rendered[0]["definitions"], ["dream"])
+
+    good = {"matched": "いい", "len": 2, "kind": "word", "reasons": [],
+            "entry": {"k": ["良い"], "r": ["いい"], "c": True, "vr": 100,
+                      "s": [{"gloss": ["good"], "misc": []}]}}
+    iishi = {"matched": "いいし", "len": 3, "kind": "name", "reasons": [],
+             "entry": {"k": ["異石"], "r": ["いいし"],
+                       "s": [{"gloss": ["Iishi"], "misc": []}]}}
+    rendered = ocr._popup_entries([iishi, good])
+    check("conjunctive し cannot turn いい into surname Iishi",
+          [entry["word"] for entry in rendered], ["良い"])
 
     dream["entry"]["s"].append(
         {"gloss": ["dream", "hope", "wish"], "misc": []})

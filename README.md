@@ -100,7 +100,9 @@ Some engines defeat every hook. Plan B has two switchable display modes:
    frame, while mouse hit-testing continues at full speed between reads. Hover
    follows the actual two-dimensional path of MeikiOCR's character boxes, so
    horizontal, vertical, and diagonally tilted text select the intended glyph
-   without making the blank corners around a slanted line clickable.
+   without making the blank corners around a slanted line clickable. Closely
+   spaced collinear detector fragments are stitched first, so large or tilted
+   words such as `自分` remain one hoverable lookup instead of stopping at `自`.
 
 Normal setup installs [MeikiOCR](https://github.com/rtr46/meikiocr), the backend
 used by Meikipop, and packaged releases bundle it into the app. It is the default

@@ -786,6 +786,98 @@ def _filter_furigana_lines(lines, ratio=0.65):
     return keep
 
 
+def _fragment_axis(line):
+    """Reading-direction unit vector inferred from one OCR fragment."""
+    chars = line.get("chars") or []
+    if len(chars) >= 2:
+        first, last = chars[0]["box"], chars[-1]["box"]
+        x1, y1 = (first[0] + first[2]) / 2, (first[1] + first[3]) / 2
+        x2, y2 = (last[0] + last[2]) / 2, (last[1] + last[3]) / 2
+        dx, dy = x2 - x1, y2 - y1
+        length = (dx * dx + dy * dy) ** 0.5
+        if length:
+            return dx / length, dy / length
+    return (0.0, 1.0) if line.get("vertical") else (1.0, 0.0)
+
+
+def _fragment_link(first, second):
+    """Score a plausible continuation, or None for distinct visual lines."""
+    if bool(first.get("vertical")) != bool(second.get("vertical")):
+        return None
+    first_chars, second_chars = first.get("chars") or [], second.get("chars") or []
+    if not first_chars or not second_chars:
+        return None
+    axis_a, axis_b = _fragment_axis(first), _fragment_axis(second)
+    if len(first_chars) < 2 <= len(second_chars):
+        axis = axis_b
+    else:
+        axis = axis_a
+    if len(first_chars) >= 2 and len(second_chars) >= 2:
+        if axis_a[0] * axis_b[0] + axis_a[1] * axis_b[1] < 0.90:
+            return None
+        axis = ((axis_a[0] + axis_b[0]) / 2, (axis_a[1] + axis_b[1]) / 2)
+        axis_len = (axis[0] ** 2 + axis[1] ** 2) ** 0.5
+        axis = (axis[0] / axis_len, axis[1] / axis_len)
+
+    # Meiki's vertical flag is authoritative.  A noisy/mocked char sequence
+    # must not turn two neighbouring vertical columns into one horizontal line
+    # (and vice versa); rotated horizontal VN text still has an x-major axis.
+    if first.get("vertical"):
+        if abs(axis[1]) < abs(axis[0]):
+            return None
+    elif abs(axis[0]) < abs(axis[1]):
+        return None
+
+    end_box, start_box = first_chars[-1]["box"], second_chars[0]["box"]
+    end = ((end_box[0] + end_box[2]) / 2, (end_box[1] + end_box[3]) / 2)
+    start = ((start_box[0] + start_box[2]) / 2, (start_box[1] + start_box[3]) / 2)
+    dx, dy = start[0] - end[0], start[1] - end[1]
+    along = dx * axis[0] + dy * axis[1]
+    cross = abs(dx * axis[1] - dy * axis[0])
+    sizes = [min(max(1, char["box"][2] - char["box"][0]),
+                 max(1, char["box"][3] - char["box"][1]))
+             for char in first_chars + second_chars]
+    typical = _median(sizes)
+    if not (-0.20 * typical <= along <= 2.40 * typical
+            and cross <= 0.65 * typical):
+        return None
+    # Prefer the expected one-character advance and the closest shared baseline.
+    return cross / typical + abs(along - typical) / (typical * 2)
+
+
+def _join_fragments(first, second):
+    chars = [*first["chars"], *second["chars"]]
+    boxes = [char["box"] for char in chars]
+    confs = [line.get("conf") for line in (first, second)
+             if isinstance(line.get("conf"), (int, float))]
+    x1, y1 = min(box[0] for box in boxes), min(box[1] for box in boxes)
+    x2, y2 = max(box[2] for box in boxes), max(box[3] for box in boxes)
+    return {"text": "".join(char["text"] for char in chars),
+            "x": x1, "y": y1, "w": max(1, x2 - x1), "h": max(1, y2 - y1),
+            "vertical": bool(first.get("vertical")),
+            "conf": sum(confs) / len(confs) if confs else None,
+            "index": min(first.get("index", 0), second.get("index", 0)),
+            "chars": chars}
+
+
+def _merge_ocr_fragments(lines):
+    """Greedily join detector fragments that form one visual text line."""
+    lines = list(lines)
+    while len(lines) > 1:
+        links = [(score, left, right)
+                 for left, first in enumerate(lines)
+                 for right, second in enumerate(lines) if left != right
+                 for score in [_fragment_link(first, second)] if score is not None]
+        if not links:
+            break
+        _score, left, right = min(links)
+        merged = _join_fragments(lines[left], lines[right])
+        lines = [line for index, line in enumerate(lines)
+                 if index not in (left, right)]
+        lines.append(merged)
+    return lines
+
+
 class MeikiOcr:
     """Meikipop-inspired OCR using its purpose-built ``meikiocr`` backend.
 
@@ -843,7 +935,7 @@ class MeikiOcr:
                           "conf": sum(confs) / len(confs) if confs else None,
                           "index": index, "chars": chars})
 
-        lines = _filter_furigana_lines(lines)
+        lines = _merge_ocr_fragments(_filter_furigana_lines(lines))
         vertical = sum(bool(line["vertical"]) for line in lines)
         if lines and vertical > len(lines) / 2:
             # Japanese vertical columns are read from right to left.
@@ -1056,7 +1148,7 @@ def _hit_text(lines, screen_x, screen_y, region):
     return min(hits, default=(None, None), key=lambda hit: hit[0])[1]
 
 
-_POPUP_PARTICLE_CHARS = set("はがをにでとへもやのかねよ")
+_POPUP_PARTICLE_CHARS = set("はがをにでとへもやのかねよし")
 _POPUP_POS = {
     "n": "noun", "pn": "pronoun", "adj-i": "い-adjective",
     "adj-na": "な-adjective", "adj-no": "の-adjective", "adv": "adverb",

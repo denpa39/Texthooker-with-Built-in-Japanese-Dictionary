@@ -12,6 +12,16 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-08-17, large-text fragment stitching)
+
+MeikiOCR detector boxes that continue along the same character path are now
+stitched before hover lookup, so large or tilted words split across adjacent
+boxes keep their full suffix (`自` + `分の` becomes `自分の`). The join requires
+matching orientation, direction, baseline, and a normal glyph-size gap; nearby
+parallel lines and vertical columns remain separate. Popup candidate filtering
+also treats conjunctive `し` as a grammatical boundary, preventing established
+`いい` from being replaced by rare surnames such as `異石` / `井石` (`いいし`).
+
 ## Done (2026-08-17, diagonal OCR hover geometry)
 
 Popup hit-testing no longer reduces every MeikiOCR line to horizontal X or
