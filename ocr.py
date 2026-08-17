@@ -298,6 +298,14 @@ def _decode_popup_command(raw):
     return json.loads(raw)
 
 
+def _popup_wheel_units(delta):
+    """Translate a Windows wheel delta into a short tkinter scroll."""
+    if not isinstance(delta, (int, float)) or not delta:
+        return 0
+    notches = max(1, int(abs(delta) // 120))
+    return (-3 if delta > 0 else 3) * notches
+
+
 def popup_window_main():
     """Render line-delimited JSON commands from stdin in a no-focus window.
 
@@ -313,10 +321,29 @@ def popup_window_main():
     root.attributes("-topmost", True)
     root.configure(bg=_DEFAULT_POPUP_THEME["bg"])
 
-    frame = tk.Frame(root, bg=_DEFAULT_POPUP_THEME["bg"],
+    shell = tk.Frame(root, bg=_DEFAULT_POPUP_THEME["bg"],
                      highlightbackground=_DEFAULT_POPUP_THEME["accent"],
-                     highlightthickness=1, padx=11, pady=9)
-    frame.pack(fill="both", expand=True)
+                     highlightthickness=1)
+    shell.pack(fill="both", expand=True)
+    canvas = tk.Canvas(shell, bg=_DEFAULT_POPUP_THEME["bg"], bd=0,
+                       highlightthickness=0)
+    scrollbar = tk.Scrollbar(shell, orient="vertical", command=canvas.yview,
+                             bd=0, highlightthickness=0)
+    canvas.configure(yscrollcommand=scrollbar.set)
+    canvas.pack(side="left", fill="both", expand=True)
+    content = tk.Frame(canvas, bg=_DEFAULT_POPUP_THEME["bg"], padx=11, pady=9)
+    content_window = canvas.create_window((0, 0), window=content, anchor="nw")
+
+    def sync_scroll_region(_event=None):
+        bounds = canvas.bbox("all")
+        if bounds:
+            canvas.configure(scrollregion=bounds)
+
+    def fit_content_width(event):
+        canvas.itemconfigure(content_window, width=event.width)
+
+    content.bind("<Configure>", sync_scroll_region)
+    canvas.bind("<Configure>", fit_content_width)
     commands = queue.Queue()
 
     def read_commands():
@@ -337,6 +364,9 @@ def popup_window_main():
 
     threading.Thread(target=read_commands, daemon=True).start()
     content_key = None
+    popup_state = {"visible": False, "scrollable": False}
+    mouse_hook = {"handle": None, "callback": None}
+    pending_scroll = collections.deque()
 
     def apply_no_activate_flags():
         if sys.platform != "win32":
@@ -369,13 +399,17 @@ def popup_window_main():
             return
         content_key = key
         root.configure(bg=theme["bg"])
-        frame.configure(bg=theme["bg"], highlightbackground=theme["accent"])
-        for child in frame.winfo_children():
+        shell.configure(bg=theme["bg"], highlightbackground=theme["accent"])
+        canvas.configure(bg=theme["bg"])
+        content.configure(bg=theme["bg"])
+        scrollbar.configure(bg=theme["bg"], troughcolor=theme["bg"],
+                            activebackground=theme["accent"])
+        for child in content.winfo_children():
             child.destroy()
         for index, entry in enumerate(entries):
             if index:
-                tk.Frame(frame, height=1, bg=theme["accent"]).pack(fill="x", pady=6)
-            header = tk.Frame(frame, bg=theme["bg"])
+                tk.Frame(content, height=1, bg=theme["accent"]).pack(fill="x", pady=6)
+            header = tk.Frame(content, bg=theme["bg"])
             header.pack(fill="x", anchor="w")
             tk.Label(header, text=entry.get("word", ""), bg=theme["bg"],
                      fg=theme["accent"], font=("Yu Gothic UI", 16, "bold"),
@@ -390,15 +424,27 @@ def popup_window_main():
                          fg=theme["pos"], font=("Segoe UI", 9),
                          anchor="w").pack(side="left")
             for definition in entry.get("definitions") or []:
-                tk.Label(frame, text=definition, bg=theme["bg"], fg=theme["text"],
+                tk.Label(content, text=definition, bg=theme["bg"], fg=theme["text"],
                          font=("Segoe UI", 10), justify="left", anchor="w",
                          wraplength=450).pack(fill="x", anchor="w", pady=(2, 0))
         root.update_idletasks()
+        sync_scroll_region()
+        canvas.yview_moveto(0)
 
     def place(command):
         root.update_idletasks()
-        width = max(260, min(480, frame.winfo_reqwidth()))
-        height = max(50, min(520, frame.winfo_reqheight()))
+        content_width = content.winfo_reqwidth()
+        content_height = content.winfo_reqheight()
+        popup_state["scrollable"] = content_height + 2 > 520
+        if popup_state["scrollable"]:
+            scrollbar.pack(side="right", fill="y")
+            root.update_idletasks()
+            scroll_width = scrollbar.winfo_reqwidth()
+        else:
+            scrollbar.pack_forget()
+            scroll_width = 0
+        width = max(260, min(480, content_width + scroll_width + 2))
+        height = max(50, min(520, content_height + 2))
         try:
             gsm = ctypes.windll.user32.GetSystemMetrics
             vx, vy, vw, vh = gsm(76), gsm(77), gsm(78), gsm(79)
@@ -437,8 +483,91 @@ def popup_window_main():
         apply_no_activate_flags()
         root.deiconify()
         root.lift()
+        popup_state["visible"] = True
+
+    def scroll_popup(event):
+        units = _popup_wheel_units(getattr(event, "delta", 0))
+        if popup_state["scrollable"] and units:
+            canvas.yview_scroll(units, "units")
+            return "break"
+        return None
+
+    root.bind_all("<MouseWheel>", scroll_popup)
+    root.bind_all("<Button-4>", lambda _event: (
+        canvas.yview_scroll(-3, "units") if popup_state["scrollable"] else None))
+    root.bind_all("<Button-5>", lambda _event: (
+        canvas.yview_scroll(3, "units") if popup_state["scrollable"] else None))
+
+    def install_mouse_hook():
+        """Catch the wheel while the Windows popup remains click-through.
+
+        The cursor stays over the game glyph so the lookup remains open. A
+        normal tkinter wheel binding cannot see that input, hence the small
+        low-level hook. It swallows wheel events only when overflow exists.
+        """
+        if sys.platform != "win32":
+            return
+        try:
+            class Point(ctypes.Structure):
+                _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+            class MouseHookData(ctypes.Structure):
+                _fields_ = [("pt", Point), ("mouseData", wintypes.DWORD),
+                            ("flags", wintypes.DWORD), ("time", wintypes.DWORD),
+                            ("extraInfo", ctypes.c_size_t)]
+
+            mouse_proc = ctypes.WINFUNCTYPE(
+                ctypes.c_ssize_t, ctypes.c_int, ctypes.c_size_t, ctypes.c_ssize_t)
+            set_hook = ctypes.windll.user32.SetWindowsHookExW
+            set_hook.argtypes = [ctypes.c_int, mouse_proc, ctypes.c_void_p, wintypes.DWORD]
+            set_hook.restype = ctypes.c_void_p
+            call_next = ctypes.windll.user32.CallNextHookEx
+            call_next.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                  ctypes.c_size_t, ctypes.c_ssize_t]
+            call_next.restype = ctypes.c_ssize_t
+
+            @mouse_proc
+            def callback(code, message, data_ptr):
+                if (code >= 0 and message == 0x020A and popup_state["visible"]
+                        and popup_state["scrollable"]):
+                    data = ctypes.cast(
+                        data_ptr, ctypes.POINTER(MouseHookData)).contents
+                    delta = ctypes.c_short((data.mouseData >> 16) & 0xffff).value
+                    units = _popup_wheel_units(delta)
+                    if units:
+                        # Never call tkinter from inside this re-entrant Windows
+                        # callback. Tk's message loop has released the GIL here;
+                        # entering Tcl directly can fatally corrupt thread state.
+                        pending_scroll.append(units)
+                        return 1
+                return call_next(mouse_hook["handle"], code, message, data_ptr)
+
+            get_module = ctypes.windll.kernel32.GetModuleHandleW
+            get_module.argtypes = [wintypes.LPCWSTR]
+            get_module.restype = ctypes.c_void_p
+            module = get_module(None)
+            mouse_hook["callback"] = callback
+            mouse_hook["handle"] = set_hook(14, callback, module, 0)  # WH_MOUSE_LL
+        except Exception:
+            mouse_hook["handle"] = None
+            mouse_hook["callback"] = None
+
+    def close_popup():
+        handle = mouse_hook.get("handle")
+        if handle and sys.platform == "win32":
+            try:
+                ctypes.windll.user32.UnhookWindowsHookEx(handle)
+            except Exception:
+                pass
+            mouse_hook["handle"] = None
+        root.destroy()
 
     def poll():
+        scroll_units = 0
+        while pending_scroll:
+            scroll_units += pending_scroll.popleft()
+        if scroll_units and popup_state["visible"] and popup_state["scrollable"]:
+            canvas.yview_scroll(scroll_units, "units")
         latest = None
         try:
             while True:
@@ -447,15 +576,17 @@ def popup_window_main():
             pass
         if latest:
             if latest.get("quit"):
-                root.destroy()
+                close_popup()
                 return
             if latest.get("show") and latest.get("entries"):
                 rebuild(latest)
                 place(latest)
             else:
+                popup_state["visible"] = False
                 root.withdraw()
         root.after(16, poll)
 
+    install_mouse_hook()
     root.after(0, poll)
     root.mainloop()
 

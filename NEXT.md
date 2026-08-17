@@ -12,6 +12,14 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-08-17, scrollable native dictionary popup)
+
+Long dictionary results are no longer clipped at the popup's 520 px height.
+The definition body now lives in a scroll viewport with an overflow indicator.
+Because the overlay deliberately stays click-through, a scoped Windows wheel
+hook scrolls it while the pointer remains over the game word; wheel input is
+left alone whenever the popup is hidden or all meanings already fit.
+
 ## Done (2026-08-17, native popup UTF-8 fix)
 
 Japanese popup text no longer becomes mojibake (`縺…`) on Windows. The parent

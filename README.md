@@ -90,6 +90,8 @@ Some engines defeat every hook. Plan B has two switchable display modes:
    by both modes and remembered across restarts. Popup lookups are not appended
    to the reader or session logs. The compact popup favours ordinary vocabulary
    over same-spelling personal-name noise, while still showing pure name hits.
+   When a word has more meanings than fit on screen, keep hovering it and use
+   the mouse wheel to scroll the popup without focusing it or the game.
 
 Normal setup installs [MeikiOCR](https://github.com/rtr46/meikiocr), the backend
 used by Meikipop, and packaged releases bundle it into the app. It is the default

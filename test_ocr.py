@@ -153,6 +153,9 @@ def test_popup_ipc_encoding():
     raw = json.dumps(command, ensure_ascii=False).encode("utf-8")
     check("popup UTF-8 pipe preserves Japanese headword and reading",
           ocr._decode_popup_command(raw), command)
+    check("popup wheel scrolls down", ocr._popup_wheel_units(-120), 3)
+    check("popup wheel scrolls up", ocr._popup_wheel_units(120), -3)
+    check("popup ignores an empty wheel event", ocr._popup_wheel_units(0), 0)
 
 
 def test_modes():
