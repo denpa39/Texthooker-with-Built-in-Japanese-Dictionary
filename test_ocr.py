@@ -138,6 +138,12 @@ def test_popup_entries():
     check("common word definition wins the compact popup",
           rendered[0]["definitions"], ["dream"])
 
+    dream["entry"]["s"].append(
+        {"gloss": ["dream", "hope", "wish"], "misc": []})
+    rendered = ocr._popup_entries([dream])
+    check("later senses do not repeat an earlier gloss",
+          rendered[0]["definitions"], ["dream", "hope; wish"])
+
 
 def test_modes():
     source = ocr.OcrSource(lambda _text: None, threading.Event(), lambda _text: [])

@@ -19,7 +19,9 @@ name may no longer consume a trailing kana particle and bury an established
 word (`夢か……` now opens `夢【ゆめ】 dream`, not the name `夢か【ゆめか】 Yumeka`).
 When a real word wins, same-spelling personal-name entries are also suppressed
 in the compact native popup; pure-name and katakana-name hits remain available.
-The exact screenshot regression is locked in `test_ocr.py` and `test_ranking.py`.
+Repeated glosses across adjacent JMdict senses are collapsed for the compact
+display. The exact screenshot regression is locked in `test_ocr.py` and
+`test_ranking.py`.
 
 ## Done (2026-08-17, switchable OCR reader + screen popup)
 

@@ -769,8 +769,15 @@ def _popup_entries(candidates, limit=3):
                  or candidate.get("matched", "")))
         reading = candidate.get("mr") or (readings[0] if readings else "")
         definitions = []
+        seen_glosses = set()
         for sense in senses[:2]:
-            glosses = [str(gloss) for gloss in (sense.get("gloss") or []) if gloss]
+            glosses = []
+            for gloss in (sense.get("gloss") or []):
+                gloss = str(gloss).strip()
+                key = gloss.casefold()
+                if gloss and key not in seen_glosses:
+                    seen_glosses.add(key)
+                    glosses.append(gloss)
             if glosses:
                 definition = "; ".join(glosses)
                 if len(definition) > 260:
