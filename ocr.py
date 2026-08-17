@@ -855,7 +855,8 @@ class MeikiOcr:
                   "box": [line["x"], line["y"], line["w"], line["h"]]}
                  for line in lines]
         hover = [{"text": "".join(char["text"] for char in line["chars"]),
-                  "chars": line["chars"], "vertical": line["vertical"]}
+                  "chars": line["chars"], "vertical": line["vertical"],
+                  "_hit": _hover_hit_geometry(line["chars"])}
                  for line in lines]
         return "\n".join(line["text"] for line in lines), trace, hover
 
@@ -970,6 +971,49 @@ def _popup_scan_covers(scan, region, cursor):
             and scan["y"] + top_pad <= cursor[1] < scan["y"] + scan["h"] - bottom_pad)
 
 
+def _point_segment_distance_sq(px, py, ax, ay, bx, by):
+    """Squared distance from a point to a finite 2D segment."""
+    dx, dy = bx - ax, by - ay
+    length_sq = dx * dx + dy * dy
+    if not length_sq:
+        return (px - ax) ** 2 + (py - ay) ** 2
+    amount = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length_sq))
+    nearest_x, nearest_y = ax + amount * dx, ay + amount * dy
+    return (px - nearest_x) ** 2 + (py - nearest_y) ** 2
+
+
+def _point_box_distance_sq(px, py, box):
+    """Squared distance to an axis-aligned box (zero inside)."""
+    left, top, right, bottom = box
+    dx = max(left - px, 0, px - right)
+    dy = max(top - py, 0, py - bottom)
+    return dx * dx + dy * dy
+
+
+def _hover_hit_geometry(chars):
+    """Precompute the orientation-free hit corridor for one OCR line."""
+    boxes = [char.get("box") for char in chars]
+    if (not boxes or any(not isinstance(box, (list, tuple)) or len(box) != 4
+                         for box in boxes)):
+        return None
+    centers = [((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
+               for box in boxes]
+    glyph_sizes = [min(max(1, box[2] - box[0]), max(1, box[3] - box[1]))
+                   for box in boxes]
+    typical = _median(glyph_sizes)
+    pad = max(3, typical * 0.35)
+    max_advance_sq = (typical * 2.5) ** 2
+    segments = [(start, end) for start, end in zip(centers, centers[1:])
+                if (end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2
+                <= max_advance_sq]
+    return {"boxes": boxes, "centers": centers, "segments": segments,
+            "pad_sq": pad * pad,
+            "bounds": (min(box[0] for box in boxes) - pad,
+                       min(box[1] for box in boxes) - pad,
+                       max(box[2] for box in boxes) + pad,
+                       max(box[3] for box in boxes) + pad)}
+
+
 def _hit_text(lines, screen_x, screen_y, region):
     """Return the OCR suffix under a desktop point, or None outside text.
 
@@ -987,28 +1031,28 @@ def _hit_text(lines, screen_x, screen_y, region):
         chars = line.get("chars") or []
         if not chars:
             continue
-        boxes = [char.get("box") for char in chars]
-        if any(not isinstance(box, (list, tuple)) or len(box) != 4 for box in boxes):
+        geometry = line.get("_hit") or _hover_hit_geometry(chars)
+        if geometry is None:
             continue
-        left = min(box[0] for box in boxes)
-        top = min(box[1] for box in boxes)
-        right = max(box[2] for box in boxes)
-        bottom = max(box[3] for box in boxes)
-        vertical = bool(line.get("vertical"))
-        cross_sizes = [(box[2] - box[0]) if vertical else (box[3] - box[1])
-                       for box in boxes]
-        pad = max(3, _median(cross_sizes) * 0.3)
-        if not (left - pad <= x <= right + pad and top - pad <= y <= bottom + pad):
+        line["_hit"] = geometry
+        left, top, right, bottom = geometry["bounds"]
+        if not (left <= x <= right and top <= y <= bottom):
             continue
-        if vertical:
-            index = min(range(len(chars)), key=lambda i: abs(y - (boxes[i][1] + boxes[i][3]) / 2))
-            distance = abs(x - (left + right) / 2)
-        else:
-            index = min(range(len(chars)), key=lambda i: abs(x - (boxes[i][0] + boxes[i][2]) / 2))
-            distance = abs(y - (top + bottom) / 2)
+        boxes, centers = geometry["boxes"], geometry["centers"]
+        box_distance_sq = min(_point_box_distance_sq(x, y, box) for box in boxes)
+        segment_distance_sq = min(
+            (_point_segment_distance_sq(x, y, start[0], start[1], end[0], end[1])
+             for start, end in geometry["segments"]), default=float("inf"))
+        distance_sq = min(box_distance_sq, segment_distance_sq)
+        if distance_sq > geometry["pad_sq"]:
+            continue
+        # Use both axes. MeikiOCR character centres trace the baseline even for
+        # tilted lines, unlike the old horizontal-X / vertical-Y assumptions.
+        index = min(range(len(chars)), key=lambda i:
+                    (x - centers[i][0]) ** 2 + (y - centers[i][1]) ** 2)
         suffix = "".join(str(char.get("text") or "") for char in chars[index:])
         if suffix:
-            hits.append((distance, suffix))
+            hits.append((distance_sq / geometry["pad_sq"], suffix))
     return min(hits, default=(None, None), key=lambda hit: hit[0])[1]
 
 

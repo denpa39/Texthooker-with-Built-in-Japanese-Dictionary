@@ -108,6 +108,18 @@ def test_hover_lookup():
     check("vertical hover uses the y axis",
           ocr._hit_text(vertical, 115, 250, region), "き")
 
+    diagonal = [{"text": "斜め文", "vertical": False, "chars": [
+        {"text": "斜", "box": [0, 40, 20, 60]},
+        {"text": "め", "box": [25, 30, 45, 50]},
+        {"text": "文", "box": [50, 20, 70, 40]},
+    ]}]
+    check("diagonal hover follows both character axes",
+          ocr._hit_text(diagonal, 135, 240, region), "め文")
+    check("blank corner of a diagonal line is not an invisible hit target",
+          ocr._hit_text(diagonal, 105, 223, region), None)
+    check("diagonal hover still bridges a normal character gap",
+          ocr._hit_text(diagonal, 123, 246, region), "め文")
+
     fullscreen = {"x": 0, "y": 0, "w": 3840, "h": 2160}
     tile = ocr._popup_scan_region(fullscreen, (1920, 1080))
     check("fullscreen popup OCR uses a bounded local tile",

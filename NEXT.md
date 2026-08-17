@@ -12,6 +12,17 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-08-17, diagonal OCR hover geometry)
+
+Popup hit-testing no longer reduces every MeikiOCR line to horizontal X or
+vertical Y. It follows the 2D centre path of the returned character boxes,
+selects the nearest glyph using both axes, and bridges only normal-size gaps
+between consecutive characters. This supports diagonally tilted VN text and
+eliminates the large invisible triangular hit areas created by an angled
+line's axis-aligned bounding rectangle. Synthetic diagonal regressions cover
+correct suffix selection, gap handling, and blank-corner rejection alongside
+the existing horizontal/vertical cases.
+
 ## Done (2026-08-17, fullscreen popup OCR performance)
 
 Screen-popup OCR no longer captures and recognizes the entire selected region
