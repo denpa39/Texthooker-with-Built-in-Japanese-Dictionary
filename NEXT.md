@@ -12,6 +12,19 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-08-17, animation-aware popup OCR)
+
+Screen popup OCR now fingerprints only the recognized text bands after its
+first read, so animation elsewhere in a fullscreen game no longer invokes both
+ONNX models repeatedly. A three-second full safety refresh discovers text that
+appears in a new location; empty scenes retry after one second. Inference waits
+for 120 ms of pointer stability instead of competing with the game while the
+user is aiming. The hover tile is now 896x512 (close to MeikiOCR's detector
+aspect ratio) to reduce capture/preprocessing and unrelated recognition boxes.
+Fragment-link geometry is cached: the synthetic 64-line/48-character no-link
+case fell from about 115 ms to 5.2 ms on this PC. `/ocr` trace now reports both
+capture and model time for field tuning.
+
 ## Done (2026-08-17, large-text fragment stitching)
 
 MeikiOCR detector boxes that continue along the same character path are now

@@ -800,6 +800,20 @@ def _fragment_axis(line):
     return (0.0, 1.0) if line.get("vertical") else (1.0, 0.0)
 
 
+def _fragment_metrics(line):
+    """Cached geometry used by every pairwise fragment comparison."""
+    cached = line.get("_fragment")
+    if cached is not None:
+        return cached
+    chars = line.get("chars") or []
+    sizes = [min(max(1, char["box"][2] - char["box"][0]),
+                 max(1, char["box"][3] - char["box"][1]))
+             for char in chars]
+    cached = (_fragment_axis(line), _median(sizes) if sizes else 1)
+    line["_fragment"] = cached
+    return cached
+
+
 def _fragment_link(first, second):
     """Score a plausible continuation, or None for distinct visual lines."""
     if bool(first.get("vertical")) != bool(second.get("vertical")):
@@ -807,7 +821,8 @@ def _fragment_link(first, second):
     first_chars, second_chars = first.get("chars") or [], second.get("chars") or []
     if not first_chars or not second_chars:
         return None
-    axis_a, axis_b = _fragment_axis(first), _fragment_axis(second)
+    (axis_a, typical_a), (axis_b, typical_b) = (
+        _fragment_metrics(first), _fragment_metrics(second))
     if len(first_chars) < 2 <= len(second_chars):
         axis = axis_b
     else:
@@ -834,10 +849,7 @@ def _fragment_link(first, second):
     dx, dy = start[0] - end[0], start[1] - end[1]
     along = dx * axis[0] + dy * axis[1]
     cross = abs(dx * axis[1] - dy * axis[0])
-    sizes = [min(max(1, char["box"][2] - char["box"][0]),
-                 max(1, char["box"][3] - char["box"][1]))
-             for char in first_chars + second_chars]
-    typical = _median(sizes)
+    typical = (typical_a + typical_b) / 2
     if not (-0.20 * typical <= along <= 2.40 * typical
             and cross <= 0.65 * typical):
         return None
@@ -1029,9 +1041,12 @@ def _cursor_pos():
     return (point.x, point.y) if user32.GetCursorPos(ctypes.byref(point)) else None
 
 
-_POPUP_SCAN_MAX_W = 1024
-_POPUP_SCAN_MAX_H = 640
+_POPUP_SCAN_MAX_W = 896
+_POPUP_SCAN_MAX_H = 512
 _POPUP_SCAN_EDGE = 72
+_POPUP_CURSOR_SETTLE = 0.12
+_POPUP_SAFETY_REFRESH = 3.0
+_POPUP_EMPTY_REFRESH = 1.0
 
 
 def _popup_scan_region(region, cursor):
@@ -1061,6 +1076,48 @@ def _popup_scan_covers(scan, region, cursor):
                   else _POPUP_SCAN_EDGE)
     return (scan["x"] + left_pad <= cursor[0] < scan["x"] + scan["w"] - right_pad
             and scan["y"] + top_pad <= cursor[1] < scan["y"] + scan["h"] - bottom_pad)
+
+
+def _popup_frame_signature(pixels, width, height, hover_lines=None):
+    """Hash only known text bands once OCR has found them.
+
+    Fullscreen game animation outside the text was making every frame look new
+    and repeatedly waking both ONNX models.  Existing glyph bands are enough to
+    notice ordinary dialogue replacement; a periodic full OCR remains the
+    safety net for text that appears somewhere completely new.
+    """
+    view = memoryview(pixels)
+    stride = width * 4
+    bands = []
+    for line in hover_lines or []:
+        boxes = [char.get("box") for char in (line.get("chars") or [])
+                 if isinstance(char.get("box"), (list, tuple))
+                 and len(char["box"]) == 4]
+        if not boxes:
+            continue
+        x1 = max(0, min(int(box[0]) for box in boxes) - 2)
+        y1 = max(0, min(int(box[1]) for box in boxes) - 2)
+        x2 = min(width, max(int(box[2]) for box in boxes) + 2)
+        y2 = min(height, max(int(box[3]) for box in boxes) + 2)
+        glyph_sizes = [min(max(1, int(box[2]) - int(box[0])),
+                           max(1, int(box[3]) - int(box[1]))) for box in boxes]
+        forward = max(48, min(192, round(_median(glyph_sizes) * 8)))
+        if line.get("vertical"):
+            y2 = min(height, y2 + forward)
+        else:
+            x2 = min(width, x2 + forward)
+        if x2 > x1 and y2 > y1:
+            bands.append((x1, y1, x2, y2))
+    digest = hashlib.md5()
+    if not bands:
+        digest.update(view)
+        return digest.digest()
+    for x1, y1, x2, y2 in bands:
+        digest.update(struct.pack("<4H", x1, y1, x2, y2))
+        for row in range(y1, y2):
+            start = row * stride + x1 * 4
+            digest.update(view[start:row * stride + x2 * 4])
+    return digest.digest()
 
 
 def _point_segment_distance_sq(px, py, ax, ay, bx, by):
@@ -1458,6 +1515,9 @@ class OcrSource:
             popup_hash = None
             popup_scan = None
             next_popup_read = 0.0
+            popup_full_read_at = 0.0
+            popup_cursor = None
+            popup_cursor_moved_at = 0.0
             popup_shown = False
             popup_anchor = None
             last_popup_theme = None
@@ -1475,6 +1535,9 @@ class OcrSource:
                     last_hash = popup_hash = None
                     popup_scan = None
                     next_popup_read = 0.0
+                    popup_full_read_at = 0.0
+                    popup_cursor = None
+                    popup_cursor_moved_at = 0.0
                     popup_shown = False
                     popup_anchor = None
                     last_popup_theme = None
@@ -1503,6 +1566,7 @@ class OcrSource:
                         popup.hide()
                         popup_shown = False
                         popup_scan = None
+                        popup_cursor = None
                         hover_lines = []
                         last_lookup = None
                         popup_entries = []
@@ -1513,6 +1577,7 @@ class OcrSource:
                         popup_shown = False
                         popup_anchor = None
                         popup_scan = None
+                        popup_cursor = None
                         hover_lines = []
                         last_lookup = None
                         popup_entries = []
@@ -1524,13 +1589,19 @@ class OcrSource:
                         last_popup_region = region_key
                         popup_hash = None
                         next_popup_read = 0.0
+                        popup_full_read_at = 0.0
                         hover_lines = []
                         last_lookup = None
                         popup_entries = []
                         popup_shown = False
 
                     now = time.monotonic()
-                    if now >= next_popup_read:
+                    if cursor != popup_cursor:
+                        popup_cursor = cursor
+                        popup_cursor_moved_at = now
+                    cursor_settled = now - popup_cursor_moved_at >= _POPUP_CURSOR_SETTLE
+                    if now >= next_popup_read and cursor_settled:
+                        capture_started = time.monotonic()
                         try:
                             px = capture_bmp(popup_scan["x"], popup_scan["y"],
                                              popup_scan["w"], popup_scan["h"])
@@ -1538,9 +1609,12 @@ class OcrSource:
                             popup.hide()
                             popup_shown = False
                             continue
-                        frame_hash = hashlib.md5(px).digest()
-                        if frame_hash != popup_hash:
-                            popup_hash = frame_hash
+                        capture_ms = (time.monotonic() - capture_started) * 1000
+                        frame_hash = _popup_frame_signature(
+                            px, popup_scan["w"], popup_scan["h"], hover_lines)
+                        force_full = now >= popup_full_read_at
+                        frame_changed = bool(hover_lines) and frame_hash != popup_hash
+                        if force_full or frame_changed:
                             started = time.monotonic()
                             text = _clean(engine.recognize(
                                 pixels=px, width=popup_scan["w"],
@@ -1552,9 +1626,20 @@ class OcrSource:
                             next_popup_read = time.monotonic() + max(
                                 0.30, min(1.50, elapsed * 3.0))
                             hover_lines = engine.hover_lines
+                            # Re-sign the same pixels using the newly detected
+                            # text bands; otherwise changing from a full-frame
+                            # signature would cause an unnecessary second read.
+                            popup_hash = _popup_frame_signature(
+                                px, popup_scan["w"], popup_scan["h"], hover_lines)
+                            popup_full_read_at = time.monotonic() + (
+                                _POPUP_SAFETY_REFRESH if hover_lines
+                                else _POPUP_EMPTY_REFRESH)
                             self.trace["read"] = text
                             self.trace["lines"] = engine.line_trace
                             self.trace["ocr_ms"] = round(elapsed * 1000)
+                            self.trace["capture_ms"] = round(capture_ms, 1)
+                            self.trace["signature"] = (
+                                "full" if force_full else "text-bands")
                             self.trace["scan_region"] = popup_scan
                         else:
                             next_popup_read = now + 0.20

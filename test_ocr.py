@@ -143,9 +143,9 @@ def test_hover_lookup():
     fullscreen = {"x": 0, "y": 0, "w": 3840, "h": 2160}
     tile = ocr._popup_scan_region(fullscreen, (1920, 1080))
     check("fullscreen popup OCR uses a bounded local tile",
-          (tile["w"], tile["h"]), (1024, 640))
+          (tile["w"], tile["h"]), (896, 512))
     check("hover tile leaves suffix context after the pointer",
-          (1920 - tile["x"], 1080 - tile["y"]), (341, 213))
+          (1920 - tile["x"], 1080 - tile["y"]), (298, 170))
     check("cursor stays inside the reusable hover tile",
           ocr._popup_scan_covers(tile, fullscreen, (2000, 1100)), True)
     check("cursor near a tile edge requests a fresh OCR tile",
@@ -154,6 +154,27 @@ def test_hover_lookup():
     small = {"x": 100, "y": 200, "w": 600, "h": 180}
     check("normal text-box selections still scan at full resolution",
           ocr._popup_scan_region(small, (400, 250)), small)
+
+    pixels = bytes(10 * 10 * 4)
+    known_text = [{"chars": [{"text": "日", "box": [2, 2, 6, 6]}]}]
+    signature = ocr._popup_frame_signature(pixels, 10, 10, known_text)
+    outside = bytearray(pixels)
+    outside[-1] = 1
+    check("animation outside known text does not wake OCR",
+          ocr._popup_frame_signature(outside, 10, 10, known_text), signature)
+    inside = bytearray(pixels)
+    inside[(3 * 10 + 3) * 4] = 1
+    check("a change inside known text wakes OCR",
+          ocr._popup_frame_signature(inside, 10, 10, known_text) != signature,
+          True)
+    appended = bytearray(pixels)
+    appended[(3 * 10 + 8) * 4] = 1
+    check("typewriter text after the known suffix wakes OCR",
+          ocr._popup_frame_signature(appended, 10, 10, known_text) != signature,
+          True)
+    check("an empty OCR result still fingerprints the full tile",
+          ocr._popup_frame_signature(outside, 10, 10) !=
+          ocr._popup_frame_signature(pixels, 10, 10), True)
 
 
 def test_popup_entries():

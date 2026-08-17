@@ -94,10 +94,12 @@ Some engines defeat every hook. Plan B has two switchable display modes:
    the mouse wheel to scroll the popup without focusing it or the game. Its
    rounded themed card mirrors the in-app dictionary layout: Mincho headword,
    reading, frequency/name chips, POS labels, and numbered modern senses.
-   Large/fullscreen selections stay responsive by OCRing only a 1024x640 tile
+   Large/fullscreen selections stay responsive by OCRing only an 896x512 tile
    around the pointer; moving near its edge recentres the tile. Animated scenes
-   use an adaptive recognition cooldown instead of keeping ONNX busy every
-   frame, while mouse hit-testing continues at full speed between reads. Hover
+   fingerprint recognized text bands so unrelated background motion does not
+   wake ONNX; a periodic full refresh still discovers text in new locations.
+   Recognition waits briefly for the pointer to settle, while mouse hit-testing
+   continues at full speed between reads. Hover
    follows the actual two-dimensional path of MeikiOCR's character boxes, so
    horizontal, vertical, and diagonally tilted text select the intended glyph
    without making the blank corners around a slanted line clickable. Closely
