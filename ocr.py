@@ -306,6 +306,30 @@ def _popup_wheel_units(delta):
     return (-3 if delta > 0 else 3) * notches
 
 
+def _mix_popup_colour(foreground, background, amount):
+    """Small color-mix equivalent for the native version of the web popup."""
+    try:
+        fg = [int(foreground[index:index + 2], 16) for index in (1, 3, 5)]
+        bg = [int(background[index:index + 2], 16) for index in (1, 3, 5)]
+        mixed = [round(f * amount + b * (1 - amount)) for f, b in zip(fg, bg)]
+        return "#" + "".join(f"{channel:02x}" for channel in mixed)
+    except (TypeError, ValueError):
+        return background
+
+
+def _popup_palette(theme):
+    """Derive the same quiet surface/line/muted colours used by style.css."""
+    return {
+        **theme,
+        "surface": _mix_popup_colour(theme["text"], theme["bg"], 0.06),
+        "panel": _mix_popup_colour(theme["text"], theme["bg"], 0.10),
+        "line": _mix_popup_colour(theme["text"], theme["bg"], 0.16),
+        "muted": _mix_popup_colour(theme["text"], theme["bg"], 0.70),
+        "accent_soft": _mix_popup_colour(theme["accent"], theme["bg"], 0.12),
+        "pos_soft": _mix_popup_colour(theme["pos"], theme["bg"], 0.12),
+    }
+
+
 def popup_window_main():
     """Render line-delimited JSON commands from stdin in a no-focus window.
 
@@ -319,19 +343,34 @@ def popup_window_main():
     root.withdraw()
     root.overrideredirect(True)
     root.attributes("-topmost", True)
-    root.configure(bg=_DEFAULT_POPUP_THEME["bg"])
+    initial_palette = _popup_palette(_DEFAULT_POPUP_THEME)
+    root.configure(bg=initial_palette["line"])
 
-    shell = tk.Frame(root, bg=_DEFAULT_POPUP_THEME["bg"],
-                     highlightbackground=_DEFAULT_POPUP_THEME["accent"],
+    shell = tk.Frame(root, bg=initial_palette["surface"],
+                     highlightbackground=initial_palette["line"],
                      highlightthickness=1)
     shell.pack(fill="both", expand=True)
-    canvas = tk.Canvas(shell, bg=_DEFAULT_POPUP_THEME["bg"], bd=0,
+    canvas = tk.Canvas(shell, bg=initial_palette["surface"], bd=0,
                        highlightthickness=0)
-    scrollbar = tk.Scrollbar(shell, orient="vertical", command=canvas.yview,
-                             bd=0, highlightthickness=0)
-    canvas.configure(yscrollcommand=scrollbar.set)
+    scrollbar = tk.Canvas(shell, width=10, bg=initial_palette["surface"],
+                          bd=0, highlightthickness=0)
+    palette_state = {"value": initial_palette}
+
+    def draw_scrollbar(first, last):
+        scrollbar.delete("all")
+        first, last = float(first), float(last)
+        if last >= 0.999:
+            return
+        height = max(1, scrollbar.winfo_height())
+        top = 8 + first * max(1, height - 16)
+        bottom = 8 + last * max(1, height - 16)
+        scrollbar.create_line(5, top, 5, max(top + 14, bottom),
+                              fill=palette_state["value"]["line"], width=4,
+                              capstyle=tk.ROUND)
+
+    canvas.configure(yscrollcommand=draw_scrollbar)
     canvas.pack(side="left", fill="both", expand=True)
-    content = tk.Frame(canvas, bg=_DEFAULT_POPUP_THEME["bg"], padx=11, pady=9)
+    content = tk.Frame(canvas, bg=initial_palette["surface"], padx=15, pady=13)
     content_window = canvas.create_window((0, 0), window=content, anchor="nw")
 
     def sync_scroll_region(_event=None):
@@ -368,7 +407,7 @@ def popup_window_main():
     mouse_hook = {"handle": None, "callback": None}
     pending_scroll = collections.deque()
 
-    def apply_no_activate_flags():
+    def apply_no_activate_flags(width, height):
         if sys.platform != "win32":
             return
         try:
@@ -387,6 +426,17 @@ def popup_window_main():
             affinity.argtypes = [wintypes.HWND, wintypes.DWORD]
             affinity.restype = wintypes.BOOL
             affinity(hwnd, 0x11)
+            # Clip the borderless window to the same rounded-card silhouette as
+            # the web popup. SetWindowRgn works on Windows 10 as well as 11.
+            create_region = ctypes.windll.gdi32.CreateRoundRectRgn
+            create_region.argtypes = [ctypes.c_int] * 6
+            create_region.restype = wintypes.HRGN
+            set_region = ctypes.windll.user32.SetWindowRgn
+            set_region.argtypes = [wintypes.HWND, wintypes.HRGN, wintypes.BOOL]
+            set_region.restype = ctypes.c_int
+            region = create_region(0, 0, width + 1, height + 1, 26, 26)
+            if region and not set_region(hwnd, region, True):
+                ctypes.windll.gdi32.DeleteObject(region)
         except Exception:
             pass
 
@@ -394,39 +444,85 @@ def popup_window_main():
         nonlocal content_key
         entries = command.get("entries") or []
         theme = {**_DEFAULT_POPUP_THEME, **(command.get("theme") or {})}
+        palette = _popup_palette(theme)
         key = json.dumps([entries, theme], ensure_ascii=False, sort_keys=True)
         if key == content_key:
             return
         content_key = key
-        root.configure(bg=theme["bg"])
-        shell.configure(bg=theme["bg"], highlightbackground=theme["accent"])
-        canvas.configure(bg=theme["bg"])
-        content.configure(bg=theme["bg"])
-        scrollbar.configure(bg=theme["bg"], troughcolor=theme["bg"],
-                            activebackground=theme["accent"])
+        palette_state["value"] = palette
+        root.configure(bg=palette["line"])
+        shell.configure(bg=palette["surface"], highlightbackground=palette["line"])
+        canvas.configure(bg=palette["surface"])
+        content.configure(bg=palette["surface"])
+        scrollbar.configure(bg=palette["surface"])
         for child in content.winfo_children():
             child.destroy()
         for index, entry in enumerate(entries):
             if index:
-                tk.Frame(content, height=1, bg=theme["accent"]).pack(fill="x", pady=6)
-            header = tk.Frame(content, bg=theme["bg"])
+                tk.Frame(content, height=1, bg=palette["line"]).pack(
+                    fill="x", pady=(13, 12))
+            inflection = entry.get("inflection") or ""
+            if inflection:
+                tk.Label(content, text=inflection, bg=palette["surface"],
+                         fg=theme["accent"], font=("Segoe UI", 9, "italic"),
+                         anchor="w", justify="left", wraplength=430).pack(
+                             fill="x", anchor="w", pady=(0, 2))
+            header = tk.Frame(content, bg=palette["surface"])
             header.pack(fill="x", anchor="w")
-            tk.Label(header, text=entry.get("word", ""), bg=theme["bg"],
-                     fg=theme["accent"], font=("Yu Gothic UI", 16, "bold"),
-                     anchor="w").pack(side="left")
+            tk.Label(header, text=entry.get("word", ""), bg=palette["surface"],
+                     fg=theme["text"], font=("Yu Mincho", 21, "bold"),
+                     anchor="w").pack(side="left", anchor="s")
             reading = entry.get("reading") or ""
             if reading and reading != entry.get("word"):
-                tk.Label(header, text="  [" + reading + "]", bg=theme["bg"],
+                tk.Label(header, text=reading, bg=palette["surface"],
                          fg=theme["accent2"], font=("Yu Gothic UI", 11),
-                         anchor="w").pack(side="left")
-            if entry.get("tag"):
-                tk.Label(header, text="  " + entry["tag"], bg=theme["bg"],
-                         fg=theme["pos"], font=("Segoe UI", 9),
-                         anchor="w").pack(side="left")
-            for definition in entry.get("definitions") or []:
-                tk.Label(content, text=definition, bg=theme["bg"], fg=theme["text"],
-                         font=("Segoe UI", 10), justify="left", anchor="w",
-                         wraplength=450).pack(fill="x", anchor="w", pady=(2, 0))
+                         anchor="w").pack(side="left", padx=(8, 0), anchor="s",
+                                          pady=(0, 3))
+            frequency = entry.get("frequency")
+            if isinstance(frequency, int):
+                hot = frequency <= 6600
+                tk.Label(header, text=f"№{frequency:,}",
+                         bg=palette["pos_soft"] if hot else palette["panel"],
+                         fg=theme["pos"] if hot else palette["muted"],
+                         font=("Segoe UI", 8), padx=6, pady=1).pack(
+                             side="left", padx=(8, 0), anchor="s", pady=(0, 4))
+            if entry.get("kind") == "name":
+                tk.Label(header, text="name", bg=palette["accent_soft"],
+                         fg=theme["accent"], font=("Segoe UI", 8),
+                         padx=7, pady=1).pack(side="right", anchor="s", pady=(0, 4))
+            alternatives = entry.get("alternatives") or []
+            if alternatives:
+                tk.Label(content, text="also: " + "、".join(alternatives),
+                         bg=palette["surface"], fg=palette["muted"],
+                         font=("Yu Gothic UI", 9), anchor="w", justify="left",
+                         wraplength=430).pack(
+                             fill="x", anchor="w", pady=(1, 0))
+            senses = entry.get("senses") or [
+                {"definition": definition, "number": number}
+                for number, definition in enumerate(entry.get("definitions") or [], 1)
+            ]
+            for sense in senses:
+                sense_frame = tk.Frame(content, bg=palette["surface"])
+                sense_frame.pack(fill="x", anchor="w", pady=(7, 0))
+                pos = sense.get("pos") or ""
+                if pos:
+                    tk.Label(sense_frame, text=pos, bg=palette["surface"],
+                             fg=theme["pos"], font=("Segoe UI", 9, "italic"),
+                             anchor="w", justify="left", wraplength=430).pack(
+                                 fill="x", anchor="w", pady=(0, 1))
+                gloss_row = tk.Frame(sense_frame, bg=palette["surface"])
+                gloss_row.pack(fill="x", anchor="w")
+                tk.Label(gloss_row, text=str(sense.get("number", "")) + ".",
+                         bg=palette["surface"], fg=palette["muted"],
+                         font=("Segoe UI", 10), anchor="nw").pack(side="left")
+                definition = sense.get("definition") or ""
+                misc = sense.get("misc") or ""
+                if misc:
+                    definition = f"({misc}) {definition}"
+                tk.Label(gloss_row, text=definition, bg=palette["surface"],
+                         fg=theme["text"], font=("Segoe UI", 10),
+                         justify="left", anchor="nw", wraplength=415).pack(
+                             side="left", fill="x", expand=True, padx=(6, 0))
         root.update_idletasks()
         sync_scroll_region()
         canvas.yview_moveto(0)
@@ -480,9 +576,11 @@ def popup_window_main():
         x = max(vx, min(x, vx + vw - width))
         y = max(vy, min(y, vy + vh - height))
         root.geometry(f"{width}x{height}{x:+d}{y:+d}")
-        apply_no_activate_flags()
+        apply_no_activate_flags(width, height)
         root.deiconify()
         root.lift()
+        root.update_idletasks()
+        draw_scrollbar(*canvas.yview())
         popup_state["visible"] = True
 
     def scroll_popup(event):
@@ -859,6 +957,43 @@ def _hit_text(lines, screen_x, screen_y, region):
 
 
 _POPUP_PARTICLE_CHARS = set("はがをにでとへもやのかねよ")
+_POPUP_POS = {
+    "n": "noun", "pn": "pronoun", "adj-i": "い-adjective",
+    "adj-na": "な-adjective", "adj-no": "の-adjective", "adv": "adverb",
+    "adv-to": "adverb (と)", "aux": "auxiliary", "aux-v": "auxiliary verb",
+    "aux-adj": "auxiliary adjective", "conj": "conjunction", "cop": "copula",
+    "ctr": "counter", "exp": "expression", "int": "interjection",
+    "prt": "particle", "pref": "prefix", "suf": "suffix", "num": "numeric",
+    "v1": "ichidan verb", "v5": "godan verb", "v5r": "godan verb (-る)",
+    "v5u": "godan verb (-う)", "v5k": "godan verb (-く)",
+    "v5g": "godan verb (-ぐ)", "v5s": "godan verb (-す)",
+    "v5t": "godan verb (-つ)", "v5n": "godan verb (-ぬ)",
+    "v5b": "godan verb (-ぶ)", "v5m": "godan verb (-む)",
+    "vs": "する verb", "vs-i": "する verb (irregular)",
+    "vs-s": "する verb (special)", "vk": "くる verb",
+    "vi": "intransitive verb", "vt": "transitive verb", "vz": "ずる verb",
+}
+_POPUP_MISC = {
+    "uk": "usu. kana", "col": "colloquial", "sl": "slang",
+    "vulg": "vulgar", "fam": "familiar", "hon": "honorific",
+    "hum": "humble", "pol": "polite", "arch": "archaic",
+    "obs": "obsolete", "rare": "rare", "dated": "dated",
+    "hist": "historical", "fem": "female term", "male": "male term",
+    "form": "formal", "euph": "euphemistic", "abbr": "abbreviation",
+    "on-mim": "onomatopoeia", "joc": "jocular", "derog": "derogatory",
+    "poet": "poetic", "chn": "children's term", "yoji": "four-character idiom",
+    "proverb": "proverb",
+}
+_POPUP_DATED = {"arch", "obs", "rare"}
+_POPUP_REASON = {
+    "-た": "past", "-て": "-te form", "-ば": "conditional",
+    "-たら": "conditional (tara)", "-たり": "-tari", "-く": "adverbial",
+    "-さ": "-sa nominal", "-ず": "without doing",
+    "-ぬ": "negative (archaic)", "-ん": "negative (casual)",
+    "-ゃ": "contraction", "-ちゃ": "contraction (-cha)",
+    "continuative": "masu stem", "-まい": "won't/probably not",
+    "potential or passive": "potential or passive",
+}
 
 
 def _popup_candidates(candidates):
@@ -901,7 +1036,7 @@ def _popup_candidates(candidates):
 
 
 def _popup_entries(candidates, limit=3):
-    """Reduce scan-shaped dictionary results to compact native-popup data."""
+    """Shape ranked results like the in-app popup for native presentation."""
     rendered = []
     for candidate in _popup_candidates(candidates):
         entry = candidate.get("entry") or {}
@@ -917,9 +1052,13 @@ def _popup_entries(candidates, limit=3):
                  or (readings[0] if readings else None)
                  or candidate.get("matched", "")))
         reading = candidate.get("mr") or (readings[0] if readings else "")
+        modern = [sense for sense in senses
+                  if not _POPUP_DATED.intersection(sense.get("misc") or [])]
+        visible_senses = modern or senses
         definitions = []
+        popup_senses = []
         seen_glosses = set()
-        for sense in senses[:2]:
+        for sense in visible_senses:
             glosses = []
             for gloss in (sense.get("gloss") or []):
                 gloss = str(gloss).strip()
@@ -929,17 +1068,32 @@ def _popup_entries(candidates, limit=3):
                     glosses.append(gloss)
             if glosses:
                 definition = "; ".join(glosses)
-                if len(definition) > 260:
-                    definition = definition[:257].rstrip() + "..."
                 definitions.append(definition)
+                popup_senses.append({
+                    "number": len(popup_senses) + 1,
+                    "pos": ", ".join(_POPUP_POS.get(tag, tag)
+                                     for tag in (sense.get("pos") or [])),
+                    "misc": ", ".join(_POPUP_MISC.get(tag, tag)
+                                      for tag in (sense.get("misc") or [])),
+                    "definition": definition,
+                })
         if not word or not definitions:
             continue
         reasons = candidate.get("reasons") or []
+        reason_labels = [_POPUP_REASON.get(str(reason), str(reason)) for reason in reasons]
         tag = "name" if candidate.get("kind") == "name" else ""
-        if reasons:
-            tag = "inflected: " + " > ".join(str(reason) for reason in reasons)
+        if reason_labels:
+            tag = "inflected: " + " > ".join(reason_labels)
+        alternatives = ([*writings, *readings[1:]] if all_usually_kana else
+                        ([*writings[1:]] if writings else [*readings[1:]]))
         rendered.append({"word": word, "reading": reading,
-                         "definitions": definitions, "tag": tag})
+                         "definitions": definitions, "senses": popup_senses,
+                         "tag": tag, "kind": candidate.get("kind") or "word",
+                         "inflection": (candidate.get("matched", "") + "  ·  " +
+                                        " › ".join(reason_labels))
+                                       if reason_labels else "",
+                         "frequency": entry.get("vr"),
+                         "alternatives": alternatives[:4]})
         if len(rendered) >= limit:
             break
     return rendered

@@ -113,13 +113,19 @@ def test_popup_entries():
     candidates = [{"matched": "食べた", "kind": "word", "reasons": ["past"],
                    "entry": {"k": ["食べる"], "r": ["たべる"],
                              "s": [{"gloss": ["to eat", "to consume"],
-                                    "misc": []}]}}]
+                                    "pos": ["v1", "vt"], "misc": ["col"]}]}}]
     rendered = ocr._popup_entries(candidates)
     check("popup uses ranked dictionary headword", rendered[0]["word"], "食べる")
     check("popup includes reading", rendered[0]["reading"], "たべる")
     check("popup keeps compact definitions", rendered[0]["definitions"],
           ["to eat; to consume"])
     check("popup labels inflection", rendered[0]["tag"], "inflected: past")
+    check("popup mirrors numbered in-app senses",
+          rendered[0]["senses"][0]["number"], 1)
+    check("popup expands the in-app part-of-speech labels",
+          rendered[0]["senses"][0]["pos"], "ichidan verb, transitive verb")
+    check("popup expands the in-app usage labels",
+          rendered[0]["senses"][0]["misc"], "colloquial")
 
     dream = {"matched": "夢", "len": 1, "kind": "word", "reasons": [],
              "entry": {"k": ["夢"], "r": ["ゆめ"], "c": True, "vr": 474,
@@ -141,9 +147,14 @@ def test_popup_entries():
 
     dream["entry"]["s"].append(
         {"gloss": ["dream", "hope", "wish"], "misc": []})
+    dream["entry"]["s"].append(
+        {"gloss": ["a rare dated sense"], "misc": ["arch"]})
     rendered = ocr._popup_entries([dream])
     check("later senses do not repeat an earlier gloss",
           rendered[0]["definitions"], ["dream", "hope; wish"])
+    check("native popup keeps the full modern sense list",
+          [sense["definition"] for sense in rendered[0]["senses"]],
+          ["dream", "hope; wish"])
 
 
 def test_popup_ipc_encoding():
@@ -156,6 +167,8 @@ def test_popup_ipc_encoding():
     check("popup wheel scrolls down", ocr._popup_wheel_units(-120), 3)
     check("popup wheel scrolls up", ocr._popup_wheel_units(120), -3)
     check("popup ignores an empty wheel event", ocr._popup_wheel_units(0), 0)
+    palette = ocr._popup_palette(ocr._DEFAULT_POPUP_THEME)
+    check("popup derives a softer app-style card surface", palette["surface"], "#e2e8f0")
 
 
 def test_modes():

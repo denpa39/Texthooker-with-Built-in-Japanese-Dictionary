@@ -12,6 +12,16 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-08-17, unified dictionary popup design)
+
+The native Screen popup now shares the in-app dictionary's visual hierarchy
+instead of looking like a separate utility: rounded themed surface, Mincho
+headword, tinted reading, VN-frequency/name chips, muted alternatives, green
+part-of-speech labels, and numbered senses. It shows the full modern sense list
+(folding rare/archaic senses as the app does), so its scrollbar exposes useful
+detail rather than a hard two-sense summary. The native card remains no-focus,
+click-through, capture-excluded, and dependency-free.
+
 ## Done (2026-08-17, scrollable native dictionary popup)
 
 Long dictionary results are no longer clipped at the popup's 520 px height.
