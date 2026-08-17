@@ -1,12 +1,13 @@
 """Unit tests for ocr.py's pure logic — the parts that don't need a screen or
-loaded MeikiOCR models. These cover result shaping, edge cleanup, and jitter
-dedup so a refactor cannot silently reintroduce those bug classes.
+loaded MeikiOCR models. These cover result shaping, hover hit-testing, compact
+popup data, edge cleanup, and jitter dedup.
 
-Needs no dict.sqlite (coverage tests skip without it) and runs anywhere:
+Needs no dict.sqlite and runs anywhere:
     python test_ocr.py
 """
 import struct
 import sys
+import threading
 import zlib
 
 try:
@@ -70,16 +71,69 @@ def test_meiki_results():
         {"text": "次の行", "chars": chars("次の行", 10, 150, 30),
          "is_vertical": False},
     ]
-    text, trace = ocr.MeikiOcr._format_results(results)
+    text, trace, hover = ocr.MeikiOcr._format_results(results)
     check("meiki result drops small furigana line", text, "ほんぶん\n次の行")
     check("meiki trace preserves line confidence", trace[0]["conf"], 0.9)
+    check("meiki hover keeps character boxes", hover[0]["chars"][1],
+          {"text": "ん", "box": [40, 100, 70, 130]})
 
     vertical = [
         {"text": "左列", "chars": chars("左列", 50, 10, 20), "is_vertical": True},
         {"text": "右列", "chars": chars("右列", 100, 10, 20), "is_vertical": True},
     ]
-    text, _ = ocr.MeikiOcr._format_results(vertical)
+    text, _, _ = ocr.MeikiOcr._format_results(vertical)
     check("vertical meiki columns read right-to-left", text, "右列\n左列")
+
+
+def test_hover_lookup():
+    horizontal = [{"text": "日本語", "vertical": False, "chars": [
+        {"text": "日", "box": [0, 0, 20, 30]},
+        {"text": "本", "box": [24, 0, 44, 30]},
+        {"text": "語", "box": [48, 0, 68, 30]},
+    ]}]
+    region = {"x": 100, "y": 200, "w": 300, "h": 100}
+    check("hover maps desktop point to OCR suffix",
+          ocr._hit_text(horizontal, 130, 215, region), "本語")
+    check("hover fills the gap between character boxes",
+          ocr._hit_text(horizontal, 122, 215, region), "日本語")
+    check("hover outside selected region does nothing",
+          ocr._hit_text(horizontal, 50, 215, region), None)
+
+    vertical = [{"text": "縦書き", "vertical": True, "chars": [
+        {"text": "縦", "box": [5, 0, 25, 20]},
+        {"text": "書", "box": [5, 22, 25, 42]},
+        {"text": "き", "box": [5, 44, 25, 64]},
+    ]}]
+    check("vertical hover uses the y axis",
+          ocr._hit_text(vertical, 115, 250, region), "き")
+
+
+def test_popup_entries():
+    candidates = [{"matched": "食べた", "kind": "word", "reasons": ["past"],
+                   "entry": {"k": ["食べる"], "r": ["たべる"],
+                             "s": [{"gloss": ["to eat", "to consume"],
+                                    "misc": []}]}}]
+    rendered = ocr._popup_entries(candidates)
+    check("popup uses ranked dictionary headword", rendered[0]["word"], "食べる")
+    check("popup includes reading", rendered[0]["reading"], "たべる")
+    check("popup keeps compact definitions", rendered[0]["definitions"],
+          ["to eat; to consume"])
+    check("popup labels inflection", rendered[0]["tag"], "inflected: past")
+
+
+def test_modes():
+    source = ocr.OcrSource(lambda _text: None, threading.Event(), lambda _text: [])
+    check("OCR defaults to reader mode", source.mode, "reader")
+    check("OCR switches to popup mode", source.set_mode("popup"), None)
+    check("OCR state exposes popup mode", source.state()["mode"], "popup")
+    source.set_mode("popup", {"bg": "#123456", "text": "not-a-colour", "hack": "#ffffff"})
+    check("popup accepts core theme colours", source.popup_theme["bg"], "#123456")
+    check("popup rejects invalid theme colours", source.popup_theme["text"],
+          ocr._DEFAULT_POPUP_THEME["text"])
+    check("popup ignores unknown theme keys", "hack" in source.popup_theme, False)
+    check("OCR rejects unknown modes", source.set_mode("telepathy"),
+          "OCR mode must be reader or popup")
+    check("rejected mode does not alter state", source.mode, "popup")
 
 
 # --------------------------------------------------------------------------- #
@@ -107,8 +161,10 @@ def test_gates():
     check("one misread kanji can't open the gate", ocr._has_japanese("ii冊 Program Files"), False)
     check("empty fails the gate", ocr._has_japanese(""), False)
 
+
 def main():
-    for t in (test_clean, test_same_line, test_meiki_results, test_png, test_gates):
+    for t in (test_clean, test_same_line, test_meiki_results, test_hover_lookup,
+              test_popup_entries, test_modes, test_png, test_gates):
         t()
     print(f"\n{TOTAL - FAILURES}/{TOTAL} passed")
     return 1 if FAILURES else 0

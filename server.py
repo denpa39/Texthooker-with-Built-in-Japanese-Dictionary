@@ -300,9 +300,9 @@ LAN_URL = None              # set by main() when --lan; /state + /qr expose it
 SERVER_URL = ""             # this server's own URL (QR fallback when not on LAN)
 _PICKER_LOCK = threading.Lock()   # one OCR region-picker overlay at a time
 
-# OCR fallback source (ocr.py): screenshots a user-chosen region and OCRs it —
-# for games Textractor can't hook. Pause stops it like every other source.
-ocr_source = ocr.OcrSource(publish_line, PAUSED)
+# Screen OCR source (ocr.py): reader mode publishes into the app; popup mode
+# reuses scan() for Caps Lock-gated definitions beside the game cursor.
+ocr_source = ocr.OcrSource(publish_line, PAUSED, lambda text: scan(text))
 
 
 # --------------------------------------------------------------------------- #
@@ -1187,10 +1187,20 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(ocr_source.state())
         elif parsed.path == "/ocr/start":
             err = ocr_source.start()
-            self._send_json({"error": err, **ocr_source.state()}, 400 if err else 200)
+            state = ocr_source.state()
+            if err:
+                state["error"] = err
+            self._send_json(state, 400 if err else 200)
         elif parsed.path == "/ocr/stop":
             ocr_source.stop()
             self._send_json(ocr_source.state())
+        elif parsed.path == "/ocr/mode":
+            body = self._read_json_body()
+            err = ocr_source.set_mode(str(body.get("mode") or ""), body.get("theme"))
+            state = ocr_source.state()
+            if err:
+                state["error"] = err
+            self._send_json(state, 400 if err else 200)
         elif parsed.path == "/agent/start":
             err = agent_launch()
             self._send_json({"error": err, **agent_state()}, 400 if err else 200)
@@ -1360,9 +1370,12 @@ def main():
         sys.stdout.reconfigure(errors="replace")   # never crash printing to a non-UTF-8 console
     except Exception:
         pass
-    # Frozen builds re-invoke this exe as the OCR region picker (see ocr.py).
+    # Frozen builds re-invoke this exe for tkinter helpers (see ocr.py).
     if "--pick-region" in sys.argv:
         ocr.pick_region_main()
+        return
+    if "--ocr-popup" in sys.argv:
+        ocr.popup_window_main()
         return
     ap = argparse.ArgumentParser(description="Down the Rabbit Hole - VN texthooker server")
     ap.add_argument("--port", type=int, default=3939)

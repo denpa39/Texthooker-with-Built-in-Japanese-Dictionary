@@ -1,11 +1,10 @@
 """
-OCR text source — the fallback for games Textractor can't hook.
+Screen OCR for games Textractor cannot hook, with two presentation modes.
 
-The user drags a box over the game's text area once (tkinter overlay, run as a
-subprocess so it can't fight pywebview's main thread). A monitor thread then
-screenshots that region (ctypes GDI, no dependencies), skips unchanged frames by
-pixel hash, OCRs changed ones, and publishes a line only after two consecutive
-identical reads — so a VN's typewriter animation doesn't spam partial lines.
+Reader mode publishes stable text from the selected area into the app window.
+Popup mode retains MeikiOCR's character boxes and shows the existing offline
+dictionary beside the mouse while Caps Lock is on. The region picker and the
+native popup run in subprocesses so tkinter never fights pywebview's main thread.
 
 Engine: meikiocr (installed by setup.py) — a fast two-stage ONNX detector and
 recognizer trained specifically on Japanese video-game text. Models download on
@@ -19,6 +18,7 @@ import difflib
 import hashlib
 import json
 import os
+import queue
 import re
 import struct
 import subprocess
@@ -38,6 +38,7 @@ if sys.platform == "win32":
     user32 = ctypes.windll.user32
     gdi32 = ctypes.windll.gdi32
     _SRCCOPY = 0x00CC0020
+    _VK_CAPITAL = 0x14
 
     class _BITMAPINFOHEADER(ctypes.Structure):
         _fields_ = [
@@ -218,7 +219,7 @@ def pick_region_main():
         vx = vy = 0
         vw, vh = root.winfo_screenwidth(), root.winfo_screenheight()
     root.overrideredirect(True)              # no decorations; spans monitors
-    root.geometry(f"{vw}x{vh}+{vx}+{vy}")
+    root.geometry(f"{vw}x{vh}{vx:+d}{vy:+d}")
     root.attributes("-alpha", 0.3)
     root.attributes("-topmost", True)
     root.configure(bg="black", cursor="crosshair")
@@ -274,6 +275,229 @@ def pick_region_subprocess():
         return json.loads(out.splitlines()[-1]) if out else None
     except (subprocess.TimeoutExpired, ValueError, OSError):
         return None
+
+
+# --------------------------------------------------------------------------- #
+# Native popup — a tiny stdin-driven tkinter process, kept out of screenshots.
+# --------------------------------------------------------------------------- #
+_DEFAULT_POPUP_THEME = {
+    "bg": "#eef4fb", "text": "#213243", "accent": "#3f6fc0",
+    "accent2": "#a9762a", "pos": "#2f7d4a", "danger": "#c0392b",
+}
+
+
+def popup_window_main():
+    """Render line-delimited JSON commands from stdin in a no-focus window.
+
+    Keeping this in a subprocess isolates tkinter from pywebview. On supported
+    Windows versions WDA_EXCLUDEFROMCAPTURE also prevents the definition popup
+    from feeding back into the next OCR frame.
+    """
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.withdraw()
+    root.overrideredirect(True)
+    root.attributes("-topmost", True)
+    root.configure(bg=_DEFAULT_POPUP_THEME["bg"])
+
+    frame = tk.Frame(root, bg=_DEFAULT_POPUP_THEME["bg"],
+                     highlightbackground=_DEFAULT_POPUP_THEME["accent"],
+                     highlightthickness=1, padx=11, pady=9)
+    frame.pack(fill="both", expand=True)
+    commands = queue.Queue()
+
+    def read_commands():
+        try:
+            for raw in sys.stdin:
+                try:
+                    commands.put(json.loads(raw))
+                except (TypeError, ValueError):
+                    pass
+        finally:
+            commands.put({"quit": True})
+
+    threading.Thread(target=read_commands, daemon=True).start()
+    content_key = None
+
+    def apply_no_activate_flags():
+        if sys.platform != "win32":
+            return
+        try:
+            hwnd = root.winfo_id()
+            get_style = ctypes.windll.user32.GetWindowLongW
+            set_style = ctypes.windll.user32.SetWindowLongW
+            get_style.argtypes = [wintypes.HWND, ctypes.c_int]
+            get_style.restype = ctypes.c_long
+            set_style.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+            set_style.restype = ctypes.c_long
+            style = get_style(hwnd, -20)  # GWL_EXSTYLE
+            # Tool window + click-through + never steal focus from the game.
+            set_style(hwnd, -20, style | 0x80 | 0x20 | 0x08000000)
+            # Windows 10 2004+: omit this popup from screen capture.
+            affinity = ctypes.windll.user32.SetWindowDisplayAffinity
+            affinity.argtypes = [wintypes.HWND, wintypes.DWORD]
+            affinity.restype = wintypes.BOOL
+            affinity(hwnd, 0x11)
+        except Exception:
+            pass
+
+    def rebuild(command):
+        nonlocal content_key
+        entries = command.get("entries") or []
+        theme = {**_DEFAULT_POPUP_THEME, **(command.get("theme") or {})}
+        key = json.dumps([entries, theme], ensure_ascii=False, sort_keys=True)
+        if key == content_key:
+            return
+        content_key = key
+        root.configure(bg=theme["bg"])
+        frame.configure(bg=theme["bg"], highlightbackground=theme["accent"])
+        for child in frame.winfo_children():
+            child.destroy()
+        for index, entry in enumerate(entries):
+            if index:
+                tk.Frame(frame, height=1, bg=theme["accent"]).pack(fill="x", pady=6)
+            header = tk.Frame(frame, bg=theme["bg"])
+            header.pack(fill="x", anchor="w")
+            tk.Label(header, text=entry.get("word", ""), bg=theme["bg"],
+                     fg=theme["accent"], font=("Yu Gothic UI", 16, "bold"),
+                     anchor="w").pack(side="left")
+            reading = entry.get("reading") or ""
+            if reading and reading != entry.get("word"):
+                tk.Label(header, text="  [" + reading + "]", bg=theme["bg"],
+                         fg=theme["accent2"], font=("Yu Gothic UI", 11),
+                         anchor="w").pack(side="left")
+            if entry.get("tag"):
+                tk.Label(header, text="  " + entry["tag"], bg=theme["bg"],
+                         fg=theme["pos"], font=("Segoe UI", 9),
+                         anchor="w").pack(side="left")
+            for definition in entry.get("definitions") or []:
+                tk.Label(frame, text=definition, bg=theme["bg"], fg=theme["text"],
+                         font=("Segoe UI", 10), justify="left", anchor="w",
+                         wraplength=450).pack(fill="x", anchor="w", pady=(2, 0))
+        root.update_idletasks()
+
+    def place(command):
+        root.update_idletasks()
+        width = max(260, min(480, frame.winfo_reqwidth()))
+        height = max(50, min(520, frame.winfo_reqheight()))
+        try:
+            gsm = ctypes.windll.user32.GetSystemMetrics
+            vx, vy, vw, vh = gsm(76), gsm(77), gsm(78), gsm(79)
+        except Exception:
+            vx = vy = 0
+            vw, vh = root.winfo_screenwidth(), root.winfo_screenheight()
+        mouse_x, mouse_y = int(command.get("x", 0)), int(command.get("y", 0))
+        x, y = mouse_x + 18, mouse_y + 24
+        if x + width > vx + vw:
+            x = mouse_x - width - 18
+        if y + height > vy + vh:
+            y = mouse_y - height - 18
+        # Prefer a position outside the OCR area even on Windows versions that
+        # do not support WDA_EXCLUDEFROMCAPTURE.
+        region = command.get("region") or {}
+        if all(isinstance(region.get(k), int) for k in ("x", "y", "w", "h")):
+            rx, ry, rw, rh = (region[k] for k in ("x", "y", "w", "h"))
+            overlaps = not (x + width <= rx or x >= rx + rw or
+                            y + height <= ry or y >= ry + rh)
+            if overlaps:
+                alternatives = [
+                    (mouse_x + 18, ry - height - 12),
+                    (mouse_x + 18, ry + rh + 12),
+                    (rx - width - 12, mouse_y + 24),
+                    (rx + rw + 12, mouse_y + 24),
+                ]
+                fitting = [(ax, ay) for ax, ay in alternatives
+                           if vx <= ax and ax + width <= vx + vw
+                           and vy <= ay and ay + height <= vy + vh]
+                if fitting:
+                    x, y = min(fitting, key=lambda point:
+                               abs(point[0] - mouse_x) + abs(point[1] - mouse_y))
+        x = max(vx, min(x, vx + vw - width))
+        y = max(vy, min(y, vy + vh - height))
+        root.geometry(f"{width}x{height}{x:+d}{y:+d}")
+        apply_no_activate_flags()
+        root.deiconify()
+        root.lift()
+
+    def poll():
+        latest = None
+        try:
+            while True:
+                latest = commands.get_nowait()
+        except queue.Empty:
+            pass
+        if latest:
+            if latest.get("quit"):
+                root.destroy()
+                return
+            if latest.get("show") and latest.get("entries"):
+                rebuild(latest)
+                place(latest)
+            else:
+                root.withdraw()
+        root.after(16, poll)
+
+    root.after(0, poll)
+    root.mainloop()
+
+
+class _PopupBridge:
+    """Own the popup subprocess and send it only changed display commands."""
+
+    def __init__(self):
+        self._process = None
+        self._last = None
+
+    @staticmethod
+    def _command():
+        if getattr(sys, "frozen", False):
+            return [sys.executable, "--ocr-popup"]
+        return [sys.executable, os.path.abspath(__file__), "--ocr-popup"]
+
+    def _spawn(self):
+        flags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
+        self._process = subprocess.Popen(
+            self._command(), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, text=True, encoding="utf-8", bufsize=1,
+            creationflags=flags)
+
+    def send(self, command):
+        raw = json.dumps(command, ensure_ascii=False, separators=(",", ":"))
+        if raw == self._last:
+            return True
+        for _attempt in range(2):
+            try:
+                if self._process is None or self._process.poll() is not None:
+                    self._spawn()
+                self._process.stdin.write(raw + "\n")
+                self._process.stdin.flush()
+                self._last = raw
+                return True
+            except (BrokenPipeError, OSError, AttributeError):
+                self._process = None
+                self._last = None
+        return False
+
+    def hide(self):
+        if self._process is not None:
+            self.send({"show": False})
+
+    def close(self):
+        process, self._process = self._process, None
+        self._last = None
+        if process is None:
+            return
+        try:
+            process.stdin.write('{"quit":true}\n')
+            process.stdin.flush()
+            process.stdin.close()
+            process.wait(timeout=0.6)
+        except (BrokenPipeError, OSError, subprocess.TimeoutExpired):
+            try:
+                process.terminate()
+            except OSError:
+                pass
 
 
 # --------------------------------------------------------------------------- #
@@ -334,6 +558,7 @@ class MeikiOcr:
         if provider:
             self.name = "meikiocr (" + provider.replace("ExecutionProvider", "") + ")"
         self.line_trace = []
+        self.hover_lines = []
         # The monitor asks for the same frozen frame again to confirm stable
         # text. Cache complete frame reads so confirmation costs a hash, not a
         # second ONNX pass; animated frames still have distinct keys.
@@ -344,23 +569,26 @@ class MeikiOcr:
         lines = []
         for index, result in enumerate(results or []):
             text = str(result.get("text") or "").strip()
-            chars = [char for char in (result.get("chars") or [])
-                     if isinstance(char, dict)
-                     and isinstance(char.get("bbox"), (list, tuple))
-                     and len(char["bbox"]) == 4]
+            raw_chars = [char for char in (result.get("chars") or [])
+                         if isinstance(char, dict)
+                         and isinstance(char.get("bbox"), (list, tuple))
+                         and len(char["bbox"]) == 4]
+            chars = [{"text": str(char.get("char") or ""),
+                      "box": [int(v) for v in char["bbox"]]}
+                     for char in raw_chars if str(char.get("char") or "")]
             if not text or not chars or not _has_japanese(text):
                 continue
-            x1 = min(char["bbox"][0] for char in chars)
-            y1 = min(char["bbox"][1] for char in chars)
-            x2 = max(char["bbox"][2] for char in chars)
-            y2 = max(char["bbox"][3] for char in chars)
+            x1 = min(char["box"][0] for char in chars)
+            y1 = min(char["box"][1] for char in chars)
+            x2 = max(char["box"][2] for char in chars)
+            y2 = max(char["box"][3] for char in chars)
             w, h = max(1, x2 - x1), max(1, y2 - y1)
-            confs = [float(char["conf"]) for char in chars
+            confs = [float(char["conf"]) for char in raw_chars
                      if isinstance(char.get("conf"), (int, float))]
             lines.append({"text": text, "x": x1, "y": y1, "w": w, "h": h,
                           "vertical": bool(result.get("is_vertical", h > w)),
                           "conf": sum(confs) / len(confs) if confs else None,
-                          "index": index})
+                          "index": index, "chars": chars})
 
         lines = _filter_furigana_lines(lines)
         vertical = sum(bool(line["vertical"]) for line in lines)
@@ -373,31 +601,38 @@ class MeikiOcr:
                   "conf": line["conf"],
                   "box": [line["x"], line["y"], line["w"], line["h"]]}
                  for line in lines]
-        return "\n".join(line["text"] for line in lines), trace
+        hover = [{"text": "".join(char["text"] for char in line["chars"]),
+                  "chars": line["chars"], "vertical": line["vertical"]}
+                 for line in lines]
+        return "\n".join(line["text"] for line in lines), trace, hover
 
     def recognize(self, bmp_path):
         try:
             with open(bmp_path, "rb") as image_file:
                 data = image_file.read()
         except OSError:
+            self.line_trace = []
+            self.hover_lines = []
             return ""
         key = hashlib.md5(data).digest()
         cached = self._cache.get(key)
         if cached is not None:
             self._cache.move_to_end(key)
-            text, self.line_trace = cached
+            text, self.line_trace, self.hover_lines = cached
             return text
 
         image = self._cv2.imdecode(
             self._np.frombuffer(data, dtype=self._np.uint8), self._cv2.IMREAD_COLOR)
         if image is None:
+            self.line_trace = []
+            self.hover_lines = []
             return ""
         results = self._ocr.run_ocr(
             image, det_threshold=self._DET_THRESHOLD,
             rec_threshold=self._REC_THRESHOLD,
             punct_conf_factor=self._PUNCT_CONF_FACTOR)
-        text, self.line_trace = self._format_results(results)
-        self._cache[key] = (text, self.line_trace)
+        text, self.line_trace, self.hover_lines = self._format_results(results)
+        self._cache[key] = (text, self.line_trace, self.hover_lines)
         if len(self._cache) > 64:
             self._cache.popitem(last=False)
         return text
@@ -413,6 +648,103 @@ def make_engine():
         raise RuntimeError("MeikiOCR is missing — run: python setup.py --ocr") from e
     except Exception as e:
         raise RuntimeError("MeikiOCR could not start: " + str(e)) from e
+
+
+def _caps_lock_on():
+    """Caps Lock toggle state, not whether the physical key is being held."""
+    if sys.platform != "win32":
+        return False
+    try:
+        return bool(user32.GetKeyState(_VK_CAPITAL) & 1)
+    except Exception:
+        return False
+
+
+def _cursor_pos():
+    if sys.platform != "win32":
+        return None
+    point = wintypes.POINT()
+    return (point.x, point.y) if user32.GetCursorPos(ctypes.byref(point)) else None
+
+
+def _hit_text(lines, screen_x, screen_y, region):
+    """Return the OCR suffix under a desktop point, or None outside text.
+
+    MeikiOCR gives one box per character. Picking the nearest character center
+    within a line also fills the tiny gaps between glyph boxes, which makes the
+    interaction feel like hovering DOM text instead of aiming at ink pixels.
+    """
+    if not region:
+        return None
+    x, y = screen_x - region["x"], screen_y - region["y"]
+    if x < 0 or y < 0 or x >= region["w"] or y >= region["h"]:
+        return None
+    hits = []
+    for line in lines or []:
+        chars = line.get("chars") or []
+        if not chars:
+            continue
+        boxes = [char.get("box") for char in chars]
+        if any(not isinstance(box, (list, tuple)) or len(box) != 4 for box in boxes):
+            continue
+        left = min(box[0] for box in boxes)
+        top = min(box[1] for box in boxes)
+        right = max(box[2] for box in boxes)
+        bottom = max(box[3] for box in boxes)
+        vertical = bool(line.get("vertical"))
+        cross_sizes = [(box[2] - box[0]) if vertical else (box[3] - box[1])
+                       for box in boxes]
+        pad = max(3, _median(cross_sizes) * 0.3)
+        if not (left - pad <= x <= right + pad and top - pad <= y <= bottom + pad):
+            continue
+        if vertical:
+            index = min(range(len(chars)), key=lambda i: abs(y - (boxes[i][1] + boxes[i][3]) / 2))
+            distance = abs(x - (left + right) / 2)
+        else:
+            index = min(range(len(chars)), key=lambda i: abs(x - (boxes[i][0] + boxes[i][2]) / 2))
+            distance = abs(y - (top + bottom) / 2)
+        suffix = "".join(str(char.get("text") or "") for char in chars[index:])
+        if suffix:
+            hits.append((distance, suffix))
+    return min(hits, default=(None, None), key=lambda hit: hit[0])[1]
+
+
+def _popup_entries(candidates, limit=3):
+    """Reduce scan-shaped dictionary results to compact native-popup data."""
+    rendered = []
+    for candidate in candidates or []:
+        entry = candidate.get("entry") or {}
+        senses = entry.get("s") or []
+        readings = entry.get("r") or []
+        writings = entry.get("k") or []
+        all_usually_kana = (candidate.get("kind") != "name" and writings and senses
+                            and all("uk" in (sense.get("misc") or [])
+                                    for sense in senses))
+        word = ((readings[0] if readings else candidate.get("matched", ""))
+                if all_usually_kana else
+                ((writings[0] if writings else None)
+                 or (readings[0] if readings else None)
+                 or candidate.get("matched", "")))
+        reading = candidate.get("mr") or (readings[0] if readings else "")
+        definitions = []
+        for sense in senses[:2]:
+            glosses = [str(gloss) for gloss in (sense.get("gloss") or []) if gloss]
+            if glosses:
+                definition = "; ".join(glosses)
+                if len(definition) > 260:
+                    definition = definition[:257].rstrip() + "..."
+                definitions.append(definition)
+        if not word or not definitions:
+            continue
+        reasons = candidate.get("reasons") or []
+        tag = "name" if candidate.get("kind") == "name" else ""
+        if reasons:
+            tag = "inflected: " + " > ".join(str(reason) for reason in reasons)
+        rendered.append({"word": word, "reading": reading,
+                         "definitions": definitions, "tag": tag})
+        if len(rendered) >= limit:
+            break
+    return rendered
 
 
 # --------------------------------------------------------------------------- #
@@ -496,13 +828,15 @@ def _same_line(a, b):
 
 
 class OcrSource:
-    """Screenshot-diff-OCR loop. publish() is server.publish_line — it dedupes,
-    logs and broadcasts like every other text source."""
+    """One MeikiOCR monitor with reader and Caps Lock popup presentation."""
 
-    def __init__(self, publish, paused_flag):
+    def __init__(self, publish, paused_flag, lookup=None):
         self._publish = publish
         self._paused = paused_flag
+        self._lookup = lookup
         self.region = load_region()
+        self.mode = "reader"
+        self.popup_theme = dict(_DEFAULT_POPUP_THEME)
         self.running = False
         self.starting = False
         self.engine_name = None
@@ -514,6 +848,8 @@ class OcrSource:
     def state(self):
         return {"running": self.running, "starting": self.starting,
                 "region": self.region, "engine": self.engine_name, "error": self.error,
+                "mode": self.mode,
+                "caps_lock": _caps_lock_on() if self.mode == "popup" else False,
                 "trace": self.trace}
 
     # -- field debug data (logs/ is gitignored — stays on this PC) ---------- #
@@ -534,6 +870,17 @@ class OcrSource:
         self.region = region
         save_region(region)
 
+    def set_mode(self, mode, theme=None):
+        if mode not in ("reader", "popup"):
+            return "OCR mode must be reader or popup"
+        if isinstance(theme, dict):
+            clean = {key: value for key, value in theme.items()
+                     if key in _DEFAULT_POPUP_THEME and isinstance(value, str)
+                     and re.fullmatch(r"#[0-9a-fA-F]{6}", value.strip())}
+            self.popup_theme.update({key: value.strip() for key, value in clean.items()})
+        self.mode = mode
+        return None
+
     def start(self):
         if self.running or self.starting:
             return None
@@ -553,6 +900,7 @@ class OcrSource:
 
     def _loop(self):
         engine = None
+        popup = _PopupBridge()
         try:
             engine = make_engine()          # slow on first start: model load/download
             self.engine_name = engine.name
@@ -562,11 +910,76 @@ class OcrSource:
             seen = collections.deque(maxlen=2)     # unconfirmed OCR signatures
             handled = collections.deque(maxlen=4)  # signatures already read
             recent = collections.deque(maxlen=6)   # (key, raw) of recent publishes
+            last_mode = None
+            popup_hash = None
+            hover_lines = []
+            last_lookup = None
+            popup_entries = []
             while not self._stop.is_set():
-                time.sleep(0.3)
+                mode = self.mode
+                if mode != last_mode:
+                    popup.hide()
+                    if mode == "reader":
+                        popup.close()
+                    last_mode = mode
+                    last_hash = popup_hash = None
+                    hover_lines = []
+                    last_lookup = None
+                    popup_entries = []
+                    seen.clear()
+                    handled.clear()
+                    self.trace = {"mode": mode}
+                time.sleep(0.08 if mode == "popup" else 0.3)
                 if self._paused.is_set():
+                    popup.hide()
                     continue
                 r = self.region
+
+                if mode == "popup":
+                    caps_on = _caps_lock_on()
+                    self.trace["caps_lock"] = caps_on
+                    cursor = _cursor_pos()
+                    if not caps_on or cursor is None:
+                        popup.hide()
+                        continue
+                    if not (r["x"] <= cursor[0] < r["x"] + r["w"] and
+                            r["y"] <= cursor[1] < r["y"] + r["h"]):
+                        popup.hide()
+                        last_lookup = None
+                        popup_entries = []
+                        continue
+                    try:
+                        px = capture_bmp(r["x"], r["y"], r["w"], r["h"], _TMP_BMP)
+                    except Exception:
+                        popup.hide()
+                        continue
+                    frame_hash = hashlib.md5(px).digest()
+                    if frame_hash != popup_hash:
+                        popup_hash = frame_hash
+                        text = _clean(engine.recognize(_TMP_BMP))
+                        hover_lines = engine.hover_lines
+                        self.trace["read"] = text
+                        self.trace["lines"] = engine.line_trace
+                    lookup_text = _hit_text(hover_lines, cursor[0], cursor[1], r)
+                    self.trace["hover"] = lookup_text
+                    if not lookup_text:
+                        popup.hide()
+                        last_lookup = None
+                        popup_entries = []
+                        continue
+                    if lookup_text != last_lookup:
+                        last_lookup = lookup_text
+                        candidates = self._lookup(lookup_text) if self._lookup else []
+                        popup_entries = _popup_entries(candidates)
+                    if popup_entries:
+                        if not popup.send({"show": True, "x": cursor[0], "y": cursor[1],
+                                           "region": r, "entries": popup_entries,
+                                           "theme": self.popup_theme}):
+                            raise RuntimeError("the on-screen OCR popup could not start")
+                    else:
+                        popup.hide()
+                    continue
+
                 try:
                     px = capture_bmp(r["x"], r["y"], r["w"], r["h"], _TMP_BMP)
                 except Exception:
@@ -637,6 +1050,7 @@ class OcrSource:
         except Exception as e:
             self.error = str(e)
         finally:
+            popup.close()
             if engine:
                 engine.close()
             self.running = False
@@ -644,5 +1058,8 @@ class OcrSource:
             self.engine_name = None
 
 
-if __name__ == "__main__" and "--pick-region" in sys.argv:
-    pick_region_main()
+if __name__ == "__main__":
+    if "--pick-region" in sys.argv:
+        pick_region_main()
+    elif "--ocr-popup" in sys.argv:
+        popup_window_main()

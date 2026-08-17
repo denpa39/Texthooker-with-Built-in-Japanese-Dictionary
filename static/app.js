@@ -951,10 +951,17 @@ async function refreshProcesses() {
 const ocrMsg = document.getElementById("ocrMsg");
 const ocrArea = document.getElementById("ocrArea");
 const ocrToggle = document.getElementById("ocrToggle");
+const ocrReaderMode = document.getElementById("ocrReaderMode");
+const ocrPopupMode = document.getElementById("ocrPopupMode");
 const OCR_HINT = "For games that won't hook — reads text straight off the screen. " +
                  "Pick just the text box, not the whole window.";
 
 function renderOcrState(st) {
+  const mode = st.mode === "popup" ? "popup" : "reader";
+  ocrReaderMode.classList.toggle("active", mode === "reader");
+  ocrPopupMode.classList.toggle("active", mode === "popup");
+  ocrReaderMode.setAttribute("aria-pressed", String(mode === "reader"));
+  ocrPopupMode.setAttribute("aria-pressed", String(mode === "popup"));
   ocrToggle.textContent = (st.running || st.starting) ? "Stop OCR" : "Start OCR";
   ocrToggle.classList.toggle("active", !!(st.running || st.starting));
   if (st.error) {
@@ -963,11 +970,16 @@ function renderOcrState(st) {
     ocrMsg.textContent = "OCR starting… (first start loads the engine, give it a moment)";
   } else if (st.running) {
     const r = st.region;
-    ocrMsg.textContent = `OCR watching ${r.w}×${r.h} px via ${st.engine} — new text ` +
-                         "appears here as the game shows it.";
+    ocrMsg.textContent = mode === "popup"
+      ? `Popup OCR watching ${r.w}×${r.h} px via ${st.engine} — Caps Lock is ` +
+        `${st.caps_lock ? "ON; hover Japanese text for definitions." : "OFF; turn it on to look up words."}`
+      : `Reader OCR watching ${r.w}×${r.h} px via ${st.engine} — new text ` +
+        "appears here as the game shows it.";
   } else if (st.region) {
     const r = st.region;
-    ocrMsg.textContent = `Area saved (${r.w}×${r.h} px). Start OCR when the game is visible.`;
+    ocrMsg.textContent = mode === "popup"
+      ? `Area saved (${r.w}×${r.h} px). Start OCR, turn Caps Lock on, then hover game text.`
+      : `Area saved (${r.w}×${r.h} px). Start OCR to send recognized lines here.`;
   } else {
     ocrMsg.textContent = OCR_HINT;
   }
@@ -988,6 +1000,24 @@ ocrToggle.addEventListener("click", async () => {
     renderOcrState(st);
     if (st.error && !stopping) ocrMsg.textContent = "OCR: " + st.error;
   } catch (_) { refreshOcr(); }
+});
+async function selectOcrMode(mode) {
+  const style = getComputedStyle(document.documentElement);
+  const theme = {
+    bg: style.getPropertyValue("--bg").trim(),
+    text: style.getPropertyValue("--text").trim(),
+    accent: style.getPropertyValue("--accent").trim(),
+    accent2: style.getPropertyValue("--accent-2").trim(),
+    pos: style.getPropertyValue("--pos").trim(),
+    danger: style.getPropertyValue("--danger").trim(),
+  };
+  try { renderOcrState(await jpost("/ocr/mode", { mode, theme })); }
+  catch (_) { refreshOcr(); }
+}
+ocrReaderMode.addEventListener("click", () => selectOcrMode("reader"));
+ocrPopupMode.addEventListener("click", () => selectOcrMode("popup"));
+document.addEventListener("vntex-appearance-change", () => {
+  if (ocrPopupMode.classList.contains("active")) selectOcrMode("popup");
 });
 
 /* Emulator hooking via Agent (bottom of the Attach panel) */

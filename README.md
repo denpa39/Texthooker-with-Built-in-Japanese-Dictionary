@@ -78,13 +78,17 @@ up even before that connects). No script for your game yet? Request one on the
 
 ### OCR mode (for games that won't hook)
 
-Some engines defeat every hook. Plan B, built in:
+Some engines defeat every hook. Plan B has two switchable display modes:
 
 1. Open **Attach** → **OCR fallback** → **Select text area**, and drag a box over
    the game's *text box only* (skip menus/UI so they don't get read).
-2. **Start OCR.** The app watches that area and reads new text automatically —
-   partial lines from typewriter animations are filtered out, and the area is
-   remembered across restarts.
+2. Choose **Reader window** to send stable recognized lines into the app, or
+   **Screen popup** for Meikipop-style lookups directly over the game.
+3. **Start OCR.** In Screen popup mode, turn **Caps Lock on** and hover Japanese
+   characters inside the selected area. The definition follows the pointer in a
+   no-focus overlay; turn Caps Lock off to hide it. The selected area is shared
+   by both modes and remembered across restarts. Popup lookups are not appended
+   to the reader or session logs.
 
 Normal setup installs [MeikiOCR](https://github.com/rtr46/meikiocr), the backend
 used by Meikipop, and packaged releases bundle it into the app. It is the default
@@ -92,7 +96,8 @@ OCR engine: a fast ONNX text-line detector plus character recognizer trained for
 Japanese video games. Its models download on the first OCR start, it uses an
 NVIDIA GPU automatically when `onnxruntime-gpu` is installed, and it does not
 need the Windows Japanese language pack. Detected character geometry is also
-used to order lines and suppress small furigana detections. `python setup.py
+used to order lines, suppress small furigana detections, and hit-test the exact
+character under the mouse in Screen popup mode. `python setup.py
 --ocr` remains available to install or verify just this backend.
 
 MeikiOCR is the only OCR engine. If it cannot initialize or download its models,
@@ -332,3 +337,5 @@ to the GitHub release — that's what the "no Python needed" install path uses.
 - Kanji info: **KANJIDIC2** (EDRDG licence).
 - Default game OCR: **meikiocr** code — Apache-2.0; downloaded
   `meiki.text.detect.v0` and `meiki.txt.recognition.v0` ONNX models — LGPL-3.0.
+- On-screen popup interaction: inspired by **Meikipop** — GPL-3.0; this project
+  uses its own stdlib Windows/tkinter implementation and the existing JMdict DB.

@@ -12,6 +12,18 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-08-17, switchable OCR reader + screen popup)
+
+Screen OCR now has two live-switchable presentation modes backed by the same
+MeikiOCR instance and saved region. **Reader window** preserves the traditional
+stable-line publishing flow. **Screen popup** retains per-character OCR boxes,
+maps the global mouse position to the hovered character, runs the remaining text
+through the existing ranked `/scan` dictionary logic, and displays compact
+definitions beside the cursor while the Caps Lock toggle is on. The lightweight
+tkinter popup runs in an isolated no-focus subprocess and opts out of Windows
+screen capture so it cannot recursively OCR itself. Its palette follows the
+app's six core theme colours. No new runtime dependency.
+
 ## Done (2026-08-17, Meikipop-style game OCR)
 
 **MeikiOCR is now the default OCR engine.** Normal source setup installs it and
