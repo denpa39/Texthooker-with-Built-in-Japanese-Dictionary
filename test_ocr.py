@@ -106,6 +106,36 @@ def test_spans():
 
 
 # --------------------------------------------------------------------------- #
+# MeikiOcr result shaping: geometry, ruby filtering, and reading order
+# --------------------------------------------------------------------------- #
+def test_meiki_results():
+    def chars(text, x, y, size, conf=0.9):
+        return [{"char": ch, "bbox": [x + i * size, y,
+                                        x + (i + 1) * size, y + size],
+                 "conf": conf}
+                for i, ch in enumerate(text)]
+
+    results = [
+        {"text": "ほんぶん", "chars": chars("ほんぶん", 10, 100, 30),
+         "is_vertical": False},
+        {"text": "よみ", "chars": chars("よみ", 10, 80, 10),
+         "is_vertical": False},
+        {"text": "次の行", "chars": chars("次の行", 10, 150, 30),
+         "is_vertical": False},
+    ]
+    text, trace = ocr.MeikiOcr._format_results(results)
+    check("meiki result drops small furigana line", text, "ほんぶん\n次の行")
+    check("meiki trace preserves line confidence", trace[0]["conf"], 0.9)
+
+    vertical = [
+        {"text": "左列", "chars": chars("左列", 50, 10, 20), "is_vertical": True},
+        {"text": "右列", "chars": chars("右列", 100, 10, 20), "is_vertical": True},
+    ]
+    text, _ = ocr.MeikiOcr._format_results(vertical)
+    check("vertical meiki columns read right-to-left", text, "右列\n左列")
+
+
+# --------------------------------------------------------------------------- #
 # _encode_png: the Anki screenshot encoder (decode it back and check pixels)
 # --------------------------------------------------------------------------- #
 def test_png():
@@ -141,7 +171,7 @@ def test_gates():
 
 def main():
     for t in (test_reading_order, test_clean, test_same_line, test_spans,
-              test_png, test_gates):
+              test_meiki_results, test_png, test_gates):
         t()
     print(f"\n{TOTAL - FAILURES}/{TOTAL} passed")
     return 1 if FAILURES else 0

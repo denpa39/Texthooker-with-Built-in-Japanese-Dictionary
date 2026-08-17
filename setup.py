@@ -10,6 +10,7 @@ Pure standard library. Just run:
     python setup.py            # full JMdict (recommended)
     python setup.py --common   # smaller "common words only" edition
     python setup.py --skip-kuromoji   # only rebuild the dictionary DB
+    python setup.py --ocr      # optional game-trained MeikiOCR backend
 
 Re-running skips files that already exist (use --force to redownload).
 """
@@ -681,6 +682,30 @@ def setup_pywebview():
               f"browser instead\n")
 
 
+def setup_meikiocr():
+    """Install the optional game-trained ONNX OCR backend for source installs.
+
+    Models are deliberately not downloaded here: meikiocr owns their cache and
+    fetches the current detector/recognizers on the first OCR start.
+    """
+    print("[OCR] game-trained MeikiOCR backend")
+    try:
+        import meikiocr  # noqa: F401
+        print("  meikiocr already installed; its models download on first OCR start\n")
+        return
+    except ImportError:
+        pass
+    if getattr(sys, "frozen", False):
+        print("  the packaged setup app cannot add Python modules. For now this "
+              "optional backend needs a source install and `python setup.py --ocr`.\n")
+        return
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "meikiocr"])
+        print("  meikiocr installed; its models download on first OCR start\n")
+    except Exception as e:
+        print(f"  meikiocr install failed ({e}); Windows OCR and manga-ocr remain available\n")
+
+
 def setup_names(force=False):
     print("[4/7] JMnedict names")
     if not os.path.isfile(DB_PATH):
@@ -730,6 +755,8 @@ def main():
     ap.add_argument("--agent", action="store_true",
                     help="only download Agent (~120 MB) for emulator hooking "
                          "(PPSSPP / PCSX2 / Vita3K / yuzu…)")
+    ap.add_argument("--ocr", action="store_true",
+                    help="only install the optional game-trained MeikiOCR backend")
     args = ap.parse_args()
 
     print("Down the Rabbit Hole - setup\n" + "=" * 28)
@@ -738,6 +765,9 @@ def main():
         return
     if args.agent:
         setup_agent(force=args.force)
+        return
+    if args.ocr:
+        setup_meikiocr()
         return
     print("Downloads the tokenizer, dictionaries and the hooking engine, then\n"
           "builds the lookup database. Roughly 250 MB of downloads, one time;\n"
@@ -758,7 +788,7 @@ def main():
     else:
         print("Done!  Start the app with run.bat  (or: python server.py)")
     print("Optional extras: emulator hooking `setup.py --agent` (~120 MB), "
-          "better OCR `pip install manga-ocr` (~400 MB) — see README.")
+          "game-trained OCR `setup.py --ocr` — see README.")
 
 
 if __name__ == "__main__":

@@ -8,8 +8,11 @@ pixel hash, OCRs changed ones, and publishes a line only after two consecutive
 identical reads — so a VN's typewriter animation doesn't spam partial lines.
 
 Engines:
+  - meikiocr  (pip install meikiocr) — fast two-stage ONNX detector +
+    recognizer trained specifically on Japanese video-game text. Preferred
+    when installed; models download on first use.
   - manga-ocr  (pip install manga-ocr) — transformer model built for Japanese
-    game/manga text; by far the best quality. Optional, ~400 MB with torch.
+    game/manga text; retained as a high-quality fallback. Optional, ~400 MB with torch.
     Generative, so it hallucinates text from no-text frames — always used
     behind a Windows-OCR text-presence gate (HybridOcr).
   - Windows built-in OCR (Windows.Media.Ocr via a persistent PowerShell worker)
@@ -401,7 +404,7 @@ class WindowsOcr:
             self.close()
             raise RuntimeError(
                 "Windows OCR has no Japanese support on this PC — install the Japanese "
-                "language pack (Settings > Language), or:  pip install manga-ocr")
+                "language pack (Settings > Language), or run:  python setup.py --ocr")
 
     def recognize_lines(self, bmp_path):
         """OCR lines with their pixel bounding boxes (in the BMP's own,
@@ -432,6 +435,139 @@ class WindowsOcr:
             self._proc.kill()
         except OSError:
             pass
+
+
+def _median(values):
+    """Small dependency-free median for OCR line-size classification."""
+    values = sorted(values)
+    middle = len(values) // 2
+    if len(values) % 2:
+        return values[middle]
+    return (values[middle - 1] + values[middle]) / 2
+
+
+def _filter_furigana_lines(lines, ratio=0.65):
+    """Drop unusually small OCR lines, separately by writing direction.
+
+    Meikipop does this before joining detected lines into paragraphs: ruby is
+    usually a separate, much thinner/shorter detection.  A median baseline is
+    less likely than the old tallest-line heuristic to discard a legitimate
+    speaker label when an oversized title or UI element enters the region.
+    Single-line groups are always retained.
+    """
+    keep = []
+    for vertical in (False, True):
+        group = [line for line in lines if bool(line.get("vertical")) == vertical]
+        if len(group) < 2:
+            keep.extend(group)
+            continue
+        sizes = [line["w"] if vertical else line["h"] for line in group]
+        threshold = _median(sizes) * ratio
+        keep.extend(line for line, size in zip(group, sizes) if size >= threshold)
+    return keep
+
+
+class MeikiOcr:
+    """Meikipop-inspired OCR using its purpose-built ``meikiocr`` backend.
+
+    The backend detects text lines on the complete selected region, then batch
+    recognizes the detected crops as individual characters.  Unlike
+    manga-ocr it is not generative, so it needs neither the Windows-OCR
+    presence gate nor seam-voting crop assembly.  Character boxes provide
+    reliable line geometry for furigana filtering and reading order.
+    """
+
+    name = "meikiocr"
+    _DET_THRESHOLD = 0.5
+    _REC_THRESHOLD = 0.1
+    _PUNCT_CONF_FACTOR = 0.2
+
+    def __init__(self):
+        import cv2
+        import numpy as np
+        from meikiocr import MeikiOCR
+
+        self._cv2 = cv2
+        self._np = np
+        self._ocr = MeikiOCR()
+        provider = getattr(self._ocr, "active_provider", None)
+        if provider:
+            self.name = "meikiocr (" + provider.replace("ExecutionProvider", "") + ")"
+        self.line_trace = []
+        # The monitor asks for the same frozen frame again to confirm stable
+        # text. Cache complete frame reads so confirmation costs a hash, not a
+        # second ONNX pass; animated frames still have distinct keys.
+        self._cache = collections.OrderedDict()
+
+    @staticmethod
+    def _format_results(results):
+        lines = []
+        for index, result in enumerate(results or []):
+            text = str(result.get("text") or "").strip()
+            chars = [char for char in (result.get("chars") or [])
+                     if isinstance(char, dict)
+                     and isinstance(char.get("bbox"), (list, tuple))
+                     and len(char["bbox"]) == 4]
+            if not text or not chars or not _has_japanese(text):
+                continue
+            x1 = min(char["bbox"][0] for char in chars)
+            y1 = min(char["bbox"][1] for char in chars)
+            x2 = max(char["bbox"][2] for char in chars)
+            y2 = max(char["bbox"][3] for char in chars)
+            w, h = max(1, x2 - x1), max(1, y2 - y1)
+            confs = [float(char["conf"]) for char in chars
+                     if isinstance(char.get("conf"), (int, float))]
+            lines.append({"text": text, "x": x1, "y": y1, "w": w, "h": h,
+                          "vertical": bool(result.get("is_vertical", h > w)),
+                          "conf": sum(confs) / len(confs) if confs else None,
+                          "index": index})
+
+        lines = _filter_furigana_lines(lines)
+        vertical = sum(bool(line["vertical"]) for line in lines)
+        if lines and vertical > len(lines) / 2:
+            # Japanese vertical columns are read from right to left.
+            lines.sort(key=lambda line: (-line["x"], line["y"]))
+        else:
+            lines.sort(key=lambda line: (line["y"], line["x"]))
+        trace = [{"engine": "meikiocr", "pick": line["text"],
+                  "conf": line["conf"],
+                  "box": [line["x"], line["y"], line["w"], line["h"]]}
+                 for line in lines]
+        return "\n".join(line["text"] for line in lines), trace
+
+    def recognize(self, bmp_path):
+        try:
+            with open(bmp_path, "rb") as image_file:
+                data = image_file.read()
+        except OSError:
+            return ""
+        key = hashlib.md5(data).digest()
+        cached = self._cache.get(key)
+        if cached is not None:
+            self._cache.move_to_end(key)
+            text, self.line_trace = cached
+            return text
+
+        image = self._cv2.imdecode(
+            self._np.frombuffer(data, dtype=self._np.uint8), self._cv2.IMREAD_COLOR)
+        if image is None:
+            return ""
+        results = self._ocr.run_ocr(
+            image, det_threshold=self._DET_THRESHOLD,
+            rec_threshold=self._REC_THRESHOLD,
+            punct_conf_factor=self._PUNCT_CONF_FACTOR)
+        text, self.line_trace = self._format_results(results)
+        self._cache[key] = (text, self.line_trace)
+        if len(self._cache) > 64:
+            self._cache.popitem(last=False)
+        return text
+
+    # A meikiocr read is already detector-gated and safe to use as the stable
+    # text signature. The frame cache makes the confirming call inexpensive.
+    peek = recognize
+
+    def close(self):
+        pass
 
 
 class MangaOcr:
@@ -740,6 +876,17 @@ class HybridOcr:
 
 
 def make_engine():
+    # Prefer Meikipop's game-specific detector/recognizer when the optional
+    # package is installed. Initialization may still fail offline on first use
+    # while its models download, so preserve every existing fallback.
+    try:
+        import meikiocr  # noqa: F401
+        try:
+            return MeikiOcr()
+        except Exception:
+            pass
+    except ImportError:
+        pass
     try:
         import manga_ocr  # noqa: F401
     except ImportError:

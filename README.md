@@ -86,16 +86,22 @@ Some engines defeat every hook. Plan B, built in:
    partial lines from typewriter animations are filtered out, and the area is
    remembered across restarts.
 
-Recognition uses Windows' built-in Japanese OCR (needs the Japanese language
-pack: Settings → Time & Language → Language). If [manga-ocr](https://github.com/kha-white/manga-ocr)
-is installed (`pip install manga-ocr`, ~400 MB with torch; with an NVIDIA GPU,
-`pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cu128`
-afterwards makes reads ~2-3x faster), it takes over the
-actual reading — far more accurate on game fonts. Windows OCR stays on to find
-*where* the text is: manga-ocr is a generative model that *hallucinates*
-plausible Japanese when fed whole screenshots (background art, multiple lines),
-so it only ever sees tight crops of the text lines Windows OCR located, and a
-frame with no Japanese found is skipped entirely.
+For the best local recognition in a source install, run `python setup.py --ocr`.
+This installs [MeikiOCR](https://github.com/rtr46/meikiocr), the backend used by
+Meikipop: a fast ONNX text-line detector plus character recognizer trained for
+Japanese video games. Its models download on the first OCR start, it uses an
+NVIDIA GPU automatically when `onnxruntime-gpu` is installed, and it does not
+need the Windows Japanese language pack. Detected character geometry is also
+used to order lines and suppress small furigana detections.
+
+Without MeikiOCR, recognition falls back automatically to the existing chain:
+Windows' built-in Japanese OCR (needs the Japanese language pack under Settings
+→ Time & Language → Language), or [manga-ocr](https://github.com/kha-white/manga-ocr)
+when installed (`pip install manga-ocr`, ~400 MB with torch). In the manga-ocr
+path Windows OCR still finds *where* text is and gates empty frames; manga-ocr is
+generative and can hallucinate on whole screenshots, so it only receives tight
+detected line crops. Nothing changes for existing installs unless MeikiOCR is
+explicitly installed.
 
 **Tip:** click a word to pin its popup open; press **Esc** to close. Hover gives a quick peek.
 
@@ -256,6 +262,7 @@ next time you open the page — no flash of the wrong theme on load.
 python setup.py --common     # smaller "common words only" dictionary
 python setup.py --force      # redownload + rebuild everything
 python setup.py --skip-kuromoji   # only rebuild the dictionary DB
+python setup.py --ocr        # install the optional game-trained MeikiOCR backend
 ```
 
 ## Server options
@@ -269,6 +276,7 @@ python server.py --no-browser    # serve only; open nothing
 python setup.py --textractor     # (re)download only the embedded Textractor
 python setup.py --no-textractor  # skip Textractor during setup
 python setup.py --agent          # download Agent (~120 MB) for emulator hooking
+python setup.py --ocr            # install MeikiOCR (source installs; models fetch on first use)
 ```
 
 ## Packaging (one-exe for non-Python users)
@@ -325,3 +333,5 @@ to the GitHub release — that's what the "no Python needed" install path uses.
   `agent/`, launched as a separate app; its community game scripts are MIT).
 - VN frequency: **jiten.moe** — CC BY-SA 4.0.
 - Kanji info: **KANJIDIC2** (EDRDG licence).
+- Optional game OCR: **meikiocr** code — Apache-2.0; downloaded
+  `meiki.text.detect.v0` and `meiki.txt.recognition.v0` ONNX models — LGPL-3.0.

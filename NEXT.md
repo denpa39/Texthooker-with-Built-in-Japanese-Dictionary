@@ -12,6 +12,18 @@ preview tools on `.claude/launch.json` server "texthooker" (port 6972).
 - **OCR per-region preprocessing** — optional upscale/threshold pass for low-contrast
   text (the multi-monitor picker half of "OCR niceties" landed 2026-07-16).
 
+## Done (2026-08-17, Meikipop-style game OCR)
+
+**MeikiOCR is now the preferred optional OCR engine.** `python setup.py --ocr`
+installs Meikipop's game-trained two-stage ONNX backend: whole-region text-line
+detection followed by batched character recognition, with the same 0.5 detection,
+0.1 recognition, and punctuation confidence settings. Character boxes drive
+top-to-bottom / vertical right-to-left ordering and median-size furigana removal.
+Complete-frame reads are pixel-cached so the stability confirmation does not run
+ONNX twice. Initialization failure or an absent package preserves the existing
+manga-ocr hybrid → Windows OCR fallback chain. Pure result-shaping tests cover
+furigana filtering, confidence traces, and vertical reading order.
+
 ## Done (2026-07-20, page numbers + jump)
 
 **Real page numbers and jump-to-page.** Footer + Book-panel now show `p. N / M`
