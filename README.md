@@ -95,13 +95,9 @@ need the Windows Japanese language pack. Detected character geometry is also
 used to order lines and suppress small furigana detections. `python setup.py
 --ocr` remains available to install or verify just this backend.
 
-Without MeikiOCR, recognition falls back automatically to the existing chain:
-Windows' built-in Japanese OCR (needs the Japanese language pack under Settings
-→ Time & Language → Language), or [manga-ocr](https://github.com/kha-white/manga-ocr)
-when installed (`pip install manga-ocr`, ~400 MB with torch). In the manga-ocr
-path Windows OCR still finds *where* text is and gates empty frames; manga-ocr is
-generative and can hallucinate on whole screenshots, so it only receives tight
-detected line crops.
+MeikiOCR is the only OCR engine. If it cannot initialize or download its models,
+the OCR panel shows the actual error; rerun `python setup.py --ocr` to repair the
+installation instead of silently dropping to a less accurate engine.
 
 **Tip:** click a word to pin its popup open; press **Esc** to close. Hover gives a quick peek.
 

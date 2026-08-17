@@ -11,6 +11,13 @@ __pycache__/
 
 # Local machine-specific editor/agent settings
 .claude/settings.local.json
+.agents/
+.codex/
+AGENTS.md
+CLAUDE.md
+.env
+.env.*
+!.env.example
 textractor/
 agent/
 

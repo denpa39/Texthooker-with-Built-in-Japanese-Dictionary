@@ -712,7 +712,7 @@ def setup_meikiocr():
                                "meikiocr>=0.3.4"])
         print("  meikiocr installed; its models download on first OCR start\n")
     except Exception as e:
-        print(f"  meikiocr install failed ({e}); Windows OCR and manga-ocr remain available\n")
+        print(f"  meikiocr install failed ({e}); rerun `python setup.py --ocr` to retry\n")
 
 
 def setup_names(force=False):
